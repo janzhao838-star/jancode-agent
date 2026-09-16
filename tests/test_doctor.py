@@ -126,3 +126,23 @@ def test_渲染结果不含裸异常信息(tmp_path):
     text = render(report)
     for noise in ("Traceback", "File \"", "Error:"):
         assert noise not in text
+
+
+def test_自检会用命令行给的密钥和地址(capsys, tmp_path):
+    """回归：--doctor 以前自己又 load_config 了一遍，把命令行覆盖全丢了。
+
+    用户排查「密钥为什么不通」时最自然的动作就是带上参数再跑一次自检。
+    如果自检检查的还是默认供应商，它报出来的结论就是反的——比不报还糟。
+    """
+    from jancode_agent.cli import main
+
+    rc = main(["--doctor", "--offline", "--api-key", "sk-x",
+               "--base-url", "http://127.0.0.1:9/v1",
+               "--workspace", str(tmp_path)])
+    out = capsys.readouterr().out
+
+    assert "http://127.0.0.1:9/v1" in out, f"自检没有用命令行给的地址：\n{out}"
+    assert "未设置" not in out, f"密钥明明给了，自检却说没设置：\n{out}"
+    assert rc == 0, "带上了密钥，自检不该报失败"
+    # 顺带守住：自检可以报密钥长度，但不能把密钥本身打出来
+    assert "sk-x" not in out, "自检把密钥回显出来了"

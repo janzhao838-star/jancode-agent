@@ -126,14 +126,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"工作目录不存在：{workspace}", file=sys.stderr)
         return 2
 
-    if args.doctor:
-        from .doctor import diagnose, render
-        cfg = load_config(provider_name=args.provider, workspace=workspace)
-        report = asyncio.run(diagnose(cfg, provider=args.provider, live=not args.offline))
-        print(render(report))
-        return 0 if report.worst != "bad" else 1
-
-
     try:
         config = load_config(provider_name=args.provider, workspace=workspace)
     except ValueError as exc:
@@ -156,6 +148,16 @@ def main(argv: list[str] | None = None) -> int:
         config = replace(config, allow_bash=False)
     if args.no_subagents:
         config = replace(config, allow_subagents=False)
+
+    if args.doctor:
+        # 自检放在命令行覆盖**之后**：以前它自己又 load_config 了一遍，
+        # 于是 --api-key / --base-url / --model 全被忽略——用户拿
+        # 「jancode --doctor --api-key sk-xxx」排查密钥问题，检查的却是默认供应商，
+        # 报出来的结论是反的。用上面装配好的 config 才对。
+        from .doctor import diagnose, render
+        report = asyncio.run(diagnose(config, provider=args.provider, live=not args.offline))
+        print(render(report))
+        return 0 if report.worst != "bad" else 1
 
     if args.web:
         # 图形界面在 server 内部自行校验密钥，这里不重复检查。
