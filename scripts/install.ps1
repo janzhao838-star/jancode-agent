@@ -23,13 +23,22 @@ Say "─────────────────────────
 Say ""
 Say "① 检查 Python"
 $py = $null
+$pythonExe = $null
+$pythonArgs = @()
 foreach ($cand in @('py -3.13','py -3.12','py -3.11','python')) {
-    $exe = $cand.Split(' ')[0]
+    $parts = $cand.Split(' ')
+    $exe = $parts[0]
+    $pre = @()
+    if ($parts.Count -gt 1) { $pre = $parts[1..($parts.Count - 1)] }
     if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) { continue }
     try {
-        $ver = & $exe -c "import sys;print('%d.%d'%sys.version_info[:2])" 2>$null
-        if ($ver -and [version]$ver -ge [version]'3.11') { $py = $cand; break }
-        else { Warn "$cand 版本过低（需要 3.11 以上，当前 $ver）" }
+        # 必须把 -3.13 这类参数带上再问版本。py 启动器不带参数时用的是**默认**解释器，
+        # 而默认版本未必是用户装的最新版：默认 3.10 + 已装 3.12 的情况下，
+        # 只问 'py' 会一路判定「版本过低」，最后误报「没有找到 Python 3.11 以上」。
+        $ver = & $exe @pre -c "import sys;print('%d.%d'%sys.version_info[:2])" 2>$null
+        if ($ver -and [version]$ver -ge [version]'3.11') {
+            $py = $cand; $pythonExe = $exe; $pythonArgs = $pre; break
+        } else { Warn "$cand 版本过低（需要 3.11 以上，当前 $ver）" }
     } catch { }
 }
 if (-not $py) {
@@ -43,17 +52,17 @@ if (-not $py) {
 "@
 }
 Ok "$py"
-$pythonExe = $py.Split(' ')[0]
-$pythonArgs = @()
-if ($py.Split(' ').Count -gt 1) { $pythonArgs = $py.Split(' ')[1..($py.Split(' ').Count-1)] }
 
 # ── 2. 取源码 ──
 Say ""
 Say "② 获取源码"
 if (Test-Path (Join-Path $Target '.git')) {
     Say "  已存在，尝试更新…"
-    try { & git -C $Target pull --ff-only --quiet 2>$null; Ok "已更新到最新" }
-    catch { Warn "更新失败（可能是本地有改动），继续使用现有版本" }
+    # 不能用 try/catch 判成败：PowerShell 里原生命令非零退出**不会**抛异常，
+    # catch 抓不住，脚本会一直报「已更新到最新」。必须看 $LASTEXITCODE。
+    & git -C $Target pull --ff-only --quiet 2>$null
+    if ($LASTEXITCODE -eq 0) { Ok "已更新到最新" }
+    else { Warn "更新失败（可能是本地有改动），继续使用现有版本" }
 } else {
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         Die @"
@@ -65,8 +74,10 @@ if (Test-Path (Join-Path $Target '.git')) {
 "@
     }
     New-Item -ItemType Directory -Force -Path (Split-Path $Target) | Out-Null
-    try { & git clone --quiet --depth 1 $Repo $Target 2>$null }
-    catch { Die "无法下载源码。请检查网络能否访问 GitHub。" }
+    # 同上：原生命令失败不抛异常，只能看退出码，否则会带着空目录继续往下走，
+    # 报出来的是后面某一步的怪错误，用户根本看不出真正原因是没下到源码。
+    & git clone --quiet --depth 1 $Repo $Target 2>$null
+    if ($LASTEXITCODE -ne 0) { Die "无法下载源码。请检查网络能否访问 GitHub。" }
     Ok "已下载到 $Target"
 }
 
@@ -93,9 +104,13 @@ Say "④ 创建启动命令"
 $Bin = Join-Path $Root 'bin'
 New-Item -ItemType Directory -Force -Path $Bin | Out-Null
 $cmdPath = Join-Path $Bin 'jancode-agent.cmd'
+# 启动脚本里用 %USERPROFILE% 而不是把绝对路径写死：
+# 中文用户名很常见，而 .cmd 是 cmd.exe 按系统代码页解析的，
+# 把带中文的路径写进去会遇到编码问题，轻则乱码、重则命令直接不可用。
+# %USERPROFILE% 本身是纯 ASCII，由 cmd 在运行时展开成真实路径，天然绕开这件事。
 @"
 @echo off
-"$vpy" -m jancode_agent.cli %*
+"%USERPROFILE%\.jancode-agent\venv\Scripts\python.exe" -m jancode_agent.cli %*
 "@ | Set-Content -Path $cmdPath -Encoding ASCII
 Ok $cmdPath
 
