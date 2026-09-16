@@ -144,6 +144,14 @@ async function run() {
           status.remove();
           add('msg err', ev.text);
           status = document.createElement('div');
+        } else if (ev.kind === 'done') {
+          // 显式处理：服务端用 done 标记流结束。这里不需要做什么，
+          // 但必须写出来——否则「不认识就忽略」会让以后新增的事件类型
+          // 被静默丢弃，界面上表现为「没有任何反应」，极难排查。
+        } else {
+          // 服务端发了界面不认识的事件。宁可显示出来，也不要静默吞掉。
+          console.warn('未知事件类型', ev);
+          add('msg err', '收到无法识别的事件：' + JSON.stringify(ev).slice(0, 200));
         }
         log.scrollTop = log.scrollHeight;
       }
