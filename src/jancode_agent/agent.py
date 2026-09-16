@@ -87,7 +87,7 @@ class Agent:
             try:
                 reply = await self._client.complete(self.messages, specs)
             except ProviderError as exc:
-                yield Step("error", text=str(exc))
+                yield Step("error", tool_ok=False, text=str(exc))
                 return
 
             if not reply.wants_tools:
@@ -115,7 +115,7 @@ class Agent:
                     self.messages.append(Message(
                         role="tool", content=note, tool_call_id=tc.id, name=tc.name,
                     ))
-                    yield Step("error", text=note)
+                    yield Step("error", tool_ok=False, text=note)
                     return
                 seen.append(signature)
 
@@ -134,4 +134,4 @@ class Agent:
                     name=tc.name,
                 ))
 
-        yield Step("error", text=f"已达最大步数 {self.config.max_steps}，任务未完成。可用 --max-steps 放宽上限。")
+        yield Step("error", tool_ok=False, text=f"已达最大步数 {self.config.max_steps}，任务未完成。可用 --max-steps 放宽上限。")

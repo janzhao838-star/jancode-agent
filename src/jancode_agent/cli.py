@@ -35,6 +35,9 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--max-steps", type=int, help="工具调用循环上限")
     p.add_argument("--no-bash", action="store_true", help="禁止执行 shell 命令")
     p.add_argument("--list-providers", action="store_true", help="列出内置供应商后退出")
+    p.add_argument("--web", action="store_true", help="启动浏览器图形界面，而不是命令行")
+    p.add_argument("--port", type=int, default=8765, help="图形界面的端口，默认 8765")
+    p.add_argument("--no-open", action="store_true", help="启动图形界面时不自动打开浏览器")
     p.add_argument("--version", action="version", version=f"jancode-agent {__version__}")
     return p
 
@@ -128,6 +131,16 @@ def main(argv: list[str] | None = None) -> int:
         config = replace(config, max_steps=args.max_steps)
     if args.no_bash:
         config = replace(config, allow_bash=False)
+
+    if args.web:
+        # 图形界面在 server 内部自行校验密钥，这里不重复检查
+        from .server import serve
+        return serve(
+            port=args.port,
+            workspace=workspace,
+            provider=args.provider,
+            open_browser=not args.no_open,
+        )
 
     if not config.provider.api_key:
         print(

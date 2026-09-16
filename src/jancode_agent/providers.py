@@ -120,7 +120,19 @@ class Client:
     def _headers(self) -> dict[str, str]:
         h = {"Content-Type": "application/json"}
         if self.provider.api_key:
-            h["Authorization"] = f"Bearer {self.provider.api_key}"
+            key = self.provider.api_key
+            # HTTP 头只能放 ASCII。密钥里混入中文（复制粘贴常见）时，
+            # 底层会抛 'ascii' codec can't encode... 这种给程序员看的错误。
+            # 在这里拦住，换成用户能照着做的提示。
+            try:
+                key.encode("ascii")
+            except UnicodeEncodeError:
+                bad = "".join(c for c in key if ord(c) > 127)
+                raise ProviderError(
+                    f"API 密钥含非 ASCII 字符：{bad!r}。"
+                    f"密钥应为纯英文数字，请检查是否误复制了中文说明文字。"
+                ) from None
+            h["Authorization"] = f"Bearer {key}"
         return h
 
     async def complete(
