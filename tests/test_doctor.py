@@ -62,9 +62,15 @@ def test_401_被识别为密钥问题而不是网络问题(tmp_path):
     original = ms._Handler.do_POST
 
     def always_401(self):
-        # 必须带上 Content-Length：HTTP/1.1 下缺了它又没有 Connection: close，
-        # 客户端会一直等响应体结束，最后以「读超时」告终——
-        # 于是这条测试测到的是超时，而不是它想测的 401 识别。
+        # 这个假响应必须自带 Content-Length，否则这条测试测到的是连接问题
+        # 而不是它想测的 401 识别。
+        #
+        # 机制（用对照实验确认过，不是猜的）：这个假处理器**不读请求体**就返回，
+        # 带着未读数据关闭连接会发 RST；而缺少 Content-Length 时客户端要一直等到
+        # EOF 才认为响应结束——等来的是 RST 而不是干净的 FIN，整个响应就丢了，
+        # 报成「请求失败：」（信息为空）。
+        # 另一种可行的修法是先把请求体读掉（self.rfile.read(length)），两种都能过；
+        # 这里选了自带长度这一种，因为它更接近真实服务的行为。
         body = b'{"error":{"message":"Invalid token","type":"new_api_error"}}'
         self.send_response(401)
         self.send_header("Content-Type", "application/json")
