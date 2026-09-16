@@ -94,6 +94,18 @@ class AgentConfig:
     bash_timeout: float = 120.0
     # 工作目录边界：文件工具的读写不得越出此目录。
     workspace: Path = field(default_factory=Path.cwd)
+    # 是否允许主智能体把子任务派给子智能体。关闭后 task 工具不再出现，
+    # 系统提示词里也不会提它——说了有却调用不到，模型会反复空试。
+    allow_subagents: bool = True
+    # 子智能体自己的工具循环上限。刻意比主智能体小：
+    # 子任务应当是聚焦的，跑太久说明任务没被拆清楚。
+    max_subagent_steps: int = 20
+    # 允许的派生层数。默认 1 表示「子智能体不能再派生子智能体」。
+    # 不做限制的话，模型可以无限套娃，一层层把额度吃光。
+    max_subagent_depth: int = 1
+    # 子智能体用的模型。留空表示与主智能体相同。
+    # 用处：把「翻文件、找代码」这类活丢给便宜快的模型，把贵的留给主循环。
+    subagent_model: str = ""
 
 
 def _env_override(provider: ProviderConfig) -> ProviderConfig:
@@ -188,4 +200,8 @@ def load_config(
         allow_bash=bool(agent_table.get("allow_bash", True)),
         bash_timeout=float(agent_table.get("bash_timeout", 120.0)),
         workspace=Path(workspace) if workspace else Path.cwd(),
+        allow_subagents=bool(agent_table.get("allow_subagents", True)),
+        max_subagent_steps=int(agent_table.get("max_subagent_steps", 20)),
+        max_subagent_depth=int(agent_table.get("max_subagent_depth", 1)),
+        subagent_model=str(agent_table.get("subagent_model", "")),
     )

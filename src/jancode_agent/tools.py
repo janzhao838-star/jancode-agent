@@ -49,11 +49,17 @@ class Toolbox:
         allow_bash: bool = True,
         bash_timeout: float = 120.0,
         max_output: int = 20_000,
+        allow_subagents: bool = False,
+        spawn_subagent: Callable[[str, str], Any] | None = None,
     ):
         self.workspace = Path(workspace).resolve()
         self.allow_bash = allow_bash
         self.bash_timeout = bash_timeout
         self.max_output = max_output
+        # 子智能体的真正执行在 Agent 层（要新建一个循环、要管深度）。
+        # 工具层只做参数校验和分发，这样 Toolbox 不需要知道模型客户端怎么来。
+        self.allow_subagents = allow_subagents
+        self.spawn_subagent = spawn_subagent
 
     # ---------- 路径安全 ----------
 
@@ -93,6 +99,10 @@ class Toolbox:
         if len(text) <= self.max_output:
             return text
         return text[: self.max_output] + f"\n…（输出过长，已截断，共 {len(text)} 字符）"
+
+    def clip(self, text: str) -> str:
+        """按 max_output 截断。任何要进入模型上下文的长文本都该过这里。"""
+        return self._clip(text)
 
     # ---------- 工具实现 ----------
 
@@ -281,6 +291,23 @@ class Toolbox:
             return ToolResult(False, f"命令退出码 {code}：\n{self._clip(text)}")
         return ToolResult(True, self._clip(text) if text.strip() else "（命令无输出，执行成功）")
 
+    async def task(self, description: str = "", prompt: str = "") -> ToolResult:
+        """把一段独立的子任务派给子智能体，只要它的最终结论。
+
+        这里是「分发」，不是「实现」：真正的跑循环在 Agent 层。
+        子智能体有独立的上下文，中间的工具调用过程不会进入主智能体的历史，
+        只把最后一条答复交回来——这正是派生子智能体省上下文的原因。
+        """
+        if not self.allow_subagents or self.spawn_subagent is None:
+            return ToolResult(False, "当前配置未启用子智能体，请自己完成这个任务。")
+        if not prompt or not prompt.strip():
+            return ToolResult(
+                False,
+                "task 缺少 prompt。需要写一段自包含的任务说明——"
+                "子智能体看不到我们这段对话，只能看到你在 prompt 里写的内容。",
+            )
+        return await self.spawn_subagent(description.strip(), prompt.strip())
+
     # ---------- 对外接口 ----------
 
     def specs(self) -> list[dict[str, Any]]:
@@ -358,6 +385,32 @@ class Toolbox:
                 },
             },
         ]
+        if self.allow_subagents:
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": "task",
+                    "description": (
+                        "把一段独立的子任务交给子智能体执行，只要它的最终结论。"
+                        "子智能体有自己的上下文，看不到当前对话，只能看到你写的 prompt，"
+                        "所以 prompt 必须自包含（目标、已知条件、要交付什么）。"
+                        "它的中间过程不进入你的上下文，适合「要翻很多文件才能回答」的调查类任务。"
+                    ),
+                    "parameters": obj(
+                        {
+                            "description": {
+                                "type": "string",
+                                "description": "三到五个字的简短说明，用于界面显示，例如「查依赖版本」",
+                            },
+                            "prompt": {
+                                "type": "string",
+                                "description": "写给子智能体的完整任务说明。它看不到我们的对话，必须自包含。",
+                            },
+                        },
+                        ["description", "prompt"],
+                    ),
+                },
+            })
         if self.allow_bash:
             tools.append({
                 "type": "function",

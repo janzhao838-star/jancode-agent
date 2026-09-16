@@ -34,6 +34,7 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--workspace", default=".", help="工作目录，默认当前目录")
     p.add_argument("--max-steps", type=int, help="工具调用循环上限")
     p.add_argument("--no-bash", action="store_true", help="禁止执行 shell 命令")
+    p.add_argument("--no-subagents", action="store_true", help="禁用子智能体（不提供 task 工具）")
     p.add_argument("--list-providers", action="store_true", help="列出内置供应商后退出")
     p.add_argument("--web", action="store_true", help="启动浏览器图形界面，而不是命令行")
     p.add_argument("--port", type=int, default=8765, help="图形界面的端口，默认 8765")
@@ -59,24 +60,36 @@ async def _run_once(agent: Agent, prompt: str, verbose: bool) -> int:
 
     exit_code = 0
     async for step in agent.run(prompt):
+        # 子智能体的步骤缩进一层。不做区分的话，主智能体和子智能体的工具调用
+        # 会混在同一个缩进级别上，看不出到底是谁在干活。
+        indent = "    " if step.subagent else "  "
         if step.kind == "tool":
             # 工具「开始」和「结束」是两个 step，用 text 是否为空区分
             if not step.text:
                 args = ", ".join(f"{k}={v!r}" for k, v in list(step.tool_args.items())[:2])
-                print(f"  ⚙ {step.tool_name}({args[:100]})", flush=True)
+                print(f"{indent}⚙ {step.tool_name}({args[:100]})", flush=True)
             elif verbose:
                 mark = "✓" if step.tool_ok else "✗"
                 body = step.text.strip().splitlines()
                 shown = body[:6]
                 for i, line in enumerate(shown):
-                    print(f"    {mark if i == 0 else ' '} {line[:160]}")
+                    print(f"{indent}  {mark if i == 0 else ' '} {line[:160]}")
                 if len(body) > len(shown):
-                    print(f"      …（另有 {len(body) - len(shown)} 行）")
+                    print(f"{indent}    …（另有 {len(body) - len(shown)} 行）")
         elif step.kind == "answer":
-            print(f"\n{step.text}\n")
+            if step.subagent:
+                # 子智能体的结论会作为工具结果回流给主智能体，这里只提示一句。
+                # 直接打印会和主智能体的最终答复混淆——用户分不清哪个是结论。
+                print(f"{indent}✓ 子智能体「{step.subagent}」已给出结论")
+            else:
+                print(f"\n{step.text}\n")
         elif step.kind == "error":
-            print(f"\n⚠ {step.text}\n", file=sys.stderr)
-            exit_code = 1
+            who = f"子智能体「{step.subagent}」：" if step.subagent else ""
+            print(f"\n⚠ {who}{step.text}\n", file=sys.stderr)
+            # 子智能体失败不算主任务失败：失败原因会作为工具结果回流，
+            # 主智能体还有机会自己接手或换个思路。
+            if not step.subagent:
+                exit_code = 1
     return exit_code
 
 
@@ -141,6 +154,8 @@ def main(argv: list[str] | None = None) -> int:
         config = replace(config, max_steps=args.max_steps)
     if args.no_bash:
         config = replace(config, allow_bash=False)
+    if args.no_subagents:
+        config = replace(config, allow_subagents=False)
 
     if args.web:
         # 图形界面在 server 内部自行校验密钥，这里不重复检查

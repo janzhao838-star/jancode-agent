@@ -28,10 +28,17 @@ def test_前端读的事件字段服务端都发了():
     read_fields = set(re.findall(r"\bev\.([A-Za-z_][A-Za-z0-9_]*)", INDEX))
     assert read_fields, "没能从界面里解析出任何字段引用，测试本身可能失效了"
 
-    # 服务端 /api/run 实际发出的字段
+    # 服务端 /api/run 实际发出的字段。
+    # 刻意从 server.py 源码里抠，而不是写死一份名单——写死的话，
+    # 服务端加了字段、界面也读了，这个测试却还盯着旧名单，等于白测。
+    import inspect
+    from jancode_agent import server as server_module
     from jancode_agent.agent import Step
     step_fields = set(Step.__dataclass_fields__)
-    payload_fields = {"kind", "text", "tool", "ok"}   # server.py 里 emit 的键
+    payload_fields: set[str] = set()
+    for call_site in re.finditer(r"emit\(\{(.*?)\}\)", inspect.getsource(server_module), re.S):
+        payload_fields |= set(re.findall(r'"([A-Za-z_][A-Za-z0-9_]*)"\s*:', call_site.group(1)))
+    assert payload_fields, "没能从 server.py 里解析出 emit 的字段，测试本身可能失效了"
 
     missing = read_fields - payload_fields
     assert not missing, (
@@ -47,11 +54,11 @@ def test_前端认识的_kind_服务端都会发():
     handled = set(re.findall(r"ev\.kind\s*===\s*'([a-z]+)'", INDEX))
     assert handled, "没能解析出界面处理的 kind"
 
-    from jancode_agent.agent import Step
     import inspect
-    src = inspect.getsource(Step)
-    emitted = set(re.findall(r'yield Step\("([a-z]+)"', inspect.getsource(
-        __import__("jancode_agent.agent", fromlist=["Agent"]).Agent.run)))
+    from jancode_agent import agent as agent_module
+    # 扫整个 agent 模块而不是只看 Agent.run：步骤是在哪一层产出的属于实现细节，
+    # 契约只关心「这个模块会不会发出界面不认识的 kind」。
+    emitted = set(re.findall(r'Step\("([a-z]+)"', inspect.getsource(agent_module)))
     emitted |= {"done"}   # server.py 结束时会补一个 done
 
     unhandled = emitted - handled

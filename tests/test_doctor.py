@@ -62,10 +62,15 @@ def test_401_被识别为密钥问题而不是网络问题(tmp_path):
     original = ms._Handler.do_POST
 
     def always_401(self):
+        # 必须带上 Content-Length：HTTP/1.1 下缺了它又没有 Connection: close，
+        # 客户端会一直等响应体结束，最后以「读超时」告终——
+        # 于是这条测试测到的是超时，而不是它想测的 401 识别。
+        body = b'{"error":{"message":"Invalid token","type":"new_api_error"}}'
         self.send_response(401)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(b'{"error":{"message":"Invalid token","type":"new_api_error"}}')
+        self.wfile.write(body)
 
     ms._Handler.do_POST = always_401
     try:

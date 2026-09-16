@@ -104,7 +104,8 @@ class Handler(BaseHTTPRequestHandler):
 
                 async for step in agent.run(prompt):
                     emit({"kind": step.kind, "text": step.text,
-                          "tool": step.tool_name, "ok": step.tool_ok})
+                          "tool": step.tool_name, "ok": step.tool_ok,
+                          "subagent": step.subagent})
 
         try:
             asyncio.run(drive())

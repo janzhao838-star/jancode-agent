@@ -9,17 +9,23 @@
    大多数情况下模型能自己纠正（换个路径、先读文件再改）。
 3. 连续多次调用完全相同的工具和参数时提前停：这是循环卡死的典型信号，
    继续跑下去只是在烧钱。
+
+关于子智能体（子智能体 = 由主智能体派生、上下文独立的另一个智能体）：
+它的价值全在「上下文隔离」——中间翻了多少文件、跑了多少命令，
+都不会进入主智能体的历史，只有最后一条答复交回来。
+所以派生逻辑写在这里，而不是 Toolbox 里：需要新建一个循环、还要管派生深度。
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import AsyncIterator, Callable
 
 from .config import AgentConfig
 from .providers import Client, Message, ProviderError, ToolCall
-from .tools import Toolbox
+from .tools import ToolResult, Toolbox
 
 SYSTEM_PROMPT = """你是一个终端里的编程助手，可以直接读写文件、执行命令。
 
@@ -35,6 +41,31 @@ SYSTEM_PROMPT = """你是一个终端里的编程助手，可以直接读写文�
 - 完成任务后简要说明改了什么，不要罗列工具调用过程。
 - 遇到明确的失败要如实报告，不要假装成功。"""
 
+# 只有在 task 工具真的可用时才追加。提示词里说了有、工具列表里却没有，
+# 模型会反复调用一个不存在的工具，把步数耗光。
+SUBAGENT_SECTION = """
+
+关于 task 工具（子智能体）：
+- 子智能体有自己的上下文，**看不到我们这段对话**，只能看到你在 prompt 里写的内容。
+  所以 prompt 必须自包含：写清楚目标、已知条件、要交付什么。
+- 它跑完只把最终结论交回来，中间翻了哪些文件、跑了哪些命令都不会进入我们的上下文。
+  因此「派它去查，拿结论回来」比你自己逐个文件读一遍更省上下文。
+- 适合：要在很多文件里翻找才能回答的调查类问题、边界清晰且可独立完成的改造。
+- 不适合：答案依赖我们刚才对话里的小事——那种直接做更快。"""
+
+# 子智能体自己的系统提示词。要点是「最后一条答复会被原样交回去」，
+# 所以它必须自包含；否则主智能体只拿到一句「已完成」，等于什么也没得到。
+SUBAGENT_SYSTEM_PROMPT = """你是子智能体，被主智能体派来执行一个边界清晰的子任务。
+
+工作方式与准则和主智能体一致：先 read_file 看清原文再改，改完尽量跑一次测试确认，
+用中文回复，不确定就去看，失败要如实报告。
+
+你的处境和主智能体不同，有三点必须记住：
+- 你看不到主智能体和用户的对话，只能依据任务说明办事。任务说明没写的信息就是没有。
+- 你的中间过程不会进入主智能体的上下文，**只有你最后一条答复会被原样交回去**。
+  所以最后一条答复必须自包含：结论是什么、依据是什么、改动了哪些文件。
+- 信息不足以完成任务时不要猜，在最后一条答复里明确指出缺什么。"""
+
 
 @dataclass
 class Step:
@@ -45,22 +76,57 @@ class Step:
     tool_name: str = ""
     tool_args: dict = field(default_factory=dict)
     tool_ok: bool = True
+    # 非空表示这一步来自子智能体，值是子智能体的标签（界面据此缩进/标注）。
+    subagent: str = ""
+    # 内部使用：工具结果本身。只有「工具执行完」那一步会带上它，
+    # 供 run() 把结果回灌进历史。不参与发给界面的序列化。
+    result: ToolResult | None = None
 
 
 class Agent:
     """把模型、工具、循环控制拼在一起。"""
 
-    def __init__(self, config: AgentConfig, client: Client | None = None):
+    def __init__(self, config: AgentConfig, client: Client | None = None, depth: int = 0):
         self.config = config
+        # 派生深度：0 是主智能体，1 是第一层子智能体。用来兜住无限套娃。
+        self.depth = depth
         self.toolbox = Toolbox(
             workspace=config.workspace,
             allow_bash=config.allow_bash,
             bash_timeout=config.bash_timeout,
             max_output=config.max_tool_output,
+            # 到了深度上限就不再提供 task 工具——从工具列表里消失，
+            # 比「留着但调用时报错」更省步数。
+            allow_subagents=config.allow_subagents and depth < config.max_subagent_depth,
+            spawn_subagent=self._spawn_subagent,
         )
         self._client = client
         self._owns_client = client is None
-        self.messages: list[Message] = [Message(role="system", content=SYSTEM_PROMPT)]
+        # 子智能体的步骤要实时冒泡给「正在等它的那次工具调用」。
+        # 没有人在等时（比如测试里直接跑子智能体）就是 None。
+        self._sub_step_sink: Callable[[Step], None] | None = None
+        self.messages: list[Message] = [Message(role="system", content=self.system_prompt())]
+
+    # ---------- 配置派生 ----------
+
+    def system_prompt(self) -> str:
+        """按当前身份和配置拼系统提示词。"""
+        if self.depth > 0 or not self.toolbox.allow_subagents:
+            return SUBAGENT_SYSTEM_PROMPT if self.depth > 0 else SYSTEM_PROMPT
+        return SYSTEM_PROMPT + SUBAGENT_SECTION
+
+    def child_config(self) -> AgentConfig:
+        """子智能体用的配置。
+
+        换模型是可选项：把「翻文件找代码」这类活交给便宜快的模型，
+        把贵的留给主循环，是子智能体最实际的省钱用法。
+        """
+        config = replace(self.config, max_steps=self.config.max_subagent_steps)
+        if not self.config.subagent_model:
+            return config
+        return replace(config, provider=replace(self.config.provider, model=self.config.subagent_model))
+
+    # ---------- 生命周期 ----------
 
     async def __aenter__(self) -> "Agent":
         if self._client is None:
@@ -72,6 +138,93 @@ class Agent:
         if self._owns_client and self._client is not None:
             await self._client.__aexit__(*exc)
             self._client = None
+
+    # ---------- 子智能体 ----------
+
+    async def _spawn_subagent(self, description: str, prompt: str) -> ToolResult:
+        """派生一个子智能体跑完整个子任务，只把最终结论交回主智能体。
+
+        上下文隔离是重点：子智能体的 messages 是新建的，它的工具调用过程
+        不会进入主智能体的历史。共享的是 HTTP 连接（同一个 Client），
+        不是对话——Connection 复用省握手，对话复用会让隔离失效。
+        """
+        label = (description or prompt).strip().splitlines()[0][:40]
+        if self.depth >= self.config.max_subagent_depth:
+            return ToolResult(False, "已经是子智能体，不能再派生下一层。请自己完成这个任务。")
+
+        child = Agent(self.child_config(), client=self._client, depth=self.depth + 1)
+        answer, failure = "", ""
+        async for step in child.run(prompt):
+            if step.kind == "answer":
+                answer = step.text
+            elif step.kind == "error":
+                failure = step.text
+            self._emit_sub_step(step, label)
+
+        if not answer:
+            reason = failure or "子智能体没有给出结论"
+            return ToolResult(False, f"子智能体「{label}」未能完成任务：{reason}")
+        return ToolResult(True, f"子智能体「{label}」的结论：\n{self.toolbox.clip(answer)}")
+
+    def _emit_sub_step(self, step: Step, label: str) -> None:
+        """把子智能体的一步冒泡出去。
+
+        没人在等就丢弃——直接跑子智能体（测试、单用）时不应该报错。
+        """
+        sink = self._sub_step_sink
+        if sink is None:
+            return
+        sink(Step(
+            kind=step.kind,
+            text=step.text,
+            tool_name=step.tool_name,
+            tool_args=step.tool_args,
+            tool_ok=step.tool_ok,
+            subagent=label,
+        ))
+
+    # ---------- 工具驱动 ----------
+
+    async def _drive_tool(self, tc: ToolCall) -> AsyncIterator[Step]:
+        """执行一次工具调用，产出「开始」「结束」两步。
+
+        task 执行期间，子智能体的每一步也在这里实时冒泡出去。
+        不这么做的话，一个跑几分钟的子任务在界面上完全静默——
+        用户只看到光标在转，判断不出它是在干活还是卡住了。
+        """
+        yield Step("tool", tool_name=tc.name, tool_args=tc.arguments)
+
+        queue: asyncio.Queue[Step] = asyncio.Queue()
+        if tc.name == "task":
+            self._sub_step_sink = queue.put_nowait
+        try:
+            call = asyncio.ensure_future(self.toolbox.call(tc.name, tc.arguments))
+            while True:
+                waiter = asyncio.ensure_future(queue.get())
+                done, _ = await asyncio.wait({call, waiter}, return_when=asyncio.FIRST_COMPLETED)
+                if waiter in done:
+                    yield waiter.result()
+                    continue
+                # 工具已结束：队列里剩下的步骤排空后收工。
+                # 这一步不会漏——子智能体的步骤是同步 put 的，call 结束前已全部入队。
+                waiter.cancel()
+                while not queue.empty():
+                    yield queue.get_nowait()
+                break
+            result = await call
+        finally:
+            self._sub_step_sink = None
+
+        yield Step(
+            "tool",
+            tool_name=tc.name,
+            tool_args=tc.arguments,
+            tool_ok=result.ok,
+            text=result.render(),
+            result=result,
+        )
+
+    # ---------- 主循环 ----------
 
     async def run(self, prompt: str) -> AsyncIterator[Step]:
         """跑一轮完整任务。以异步生成器形式产出每一步，便于实时显示。"""
@@ -103,8 +256,6 @@ class Agent:
             ))
 
             for tc in reply.tool_calls:
-                yield Step("tool", tool_name=tc.name, tool_args=tc.arguments, text="")
-
                 # 重复调用检测：同工具同参数连续出现，说明模型在打转
                 signature = (tc.name, json.dumps(tc.arguments, sort_keys=True, ensure_ascii=False))
                 if seen.count(signature) >= 2:
@@ -119,14 +270,14 @@ class Agent:
                     return
                 seen.append(signature)
 
-                result = await self.toolbox.call(tc.name, tc.arguments)
-                yield Step(
-                    "tool",
-                    tool_name=tc.name,
-                    tool_args=tc.arguments,
-                    tool_ok=result.ok,
-                    text=result.render(),
-                )
+                # 工具结果由「结束」那一步带回来（见 Step.result 的说明）
+                result: ToolResult | None = None
+                async for step in self._drive_tool(tc):
+                    if step.result is not None:
+                        result = step.result
+                    yield step
+                assert result is not None, "工具步骤流必须以带结果的一步结束"
+
                 self.messages.append(Message(
                     role="tool",
                     content=result.render(),
