@@ -38,6 +38,8 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--web", action="store_true", help="启动浏览器图形界面，而不是命令行")
     p.add_argument("--port", type=int, default=8765, help="图形界面的端口，默认 8765")
     p.add_argument("--no-open", action="store_true", help="启动图形界面时不自动打开浏览器")
+    p.add_argument("--doctor", action="store_true", help="检查环境并诊断问题")
+    p.add_argument("--offline", action="store_true", help="自检时不发网络请求")
     p.add_argument("--version", action="version", version=f"jancode-agent {__version__}")
     return p
 
@@ -110,6 +112,14 @@ def main(argv: list[str] | None = None) -> int:
     if not workspace.is_dir():
         print(f"工作目录不存在：{workspace}", file=sys.stderr)
         return 2
+
+    if args.doctor:
+        from .doctor import diagnose, render
+        cfg = load_config(provider_name=args.provider, workspace=workspace)
+        report = asyncio.run(diagnose(cfg, provider=args.provider, live=not args.offline))
+        print(render(report))
+        return 0 if report.worst != "bad" else 1
+
 
     try:
         config = load_config(provider_name=args.provider, workspace=workspace)

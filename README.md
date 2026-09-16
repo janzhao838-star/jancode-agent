@@ -65,6 +65,25 @@ jancode --web                              # 图形界面（浏览器里用）
 jancode --base-url https://你的站/v1 --model deepseek-v3 "写一个快速排序"
 ```
 
+## 出问题了先跑自检
+
+```bash
+jancode-agent --doctor
+```
+
+它会检查 Python 版本、配置文件、密钥、工作目录，并**真的发一次请求**确认能不能连通。
+每一项都会告诉你「哪里不对、该怎么办」：
+
+```
+  ✗ 连接中转站
+      https://router.aionclaw.com/v1 拒绝了这个密钥（401）
+
+      → 密钥无效或已过期。到中转站的「令牌」页面重新创建一个。
+      → 站点原始报错：{"error":{"message":"Invalid token",...}}
+```
+
+加 `--offline` 可以跳过网络检查。有问题时退出码为 1，便于脚本判断。
+
 ## 内置供应商
 
 | 名称 | 说明 |
