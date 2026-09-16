@@ -70,10 +70,58 @@ def test_前端认识的_kind_服务端都会发():
     assert not (handled - emitted), f"界面处理了服务端不会发的 kind：{sorted(handled - emitted)}"
 
 
+def test_pyproject_把界面文件声明成了包数据():
+    """回归的是一个很隐蔽的打包 bug。
+
+    setuptools 默认只打包 .py，web/index.html 属于数据文件，不显式声明就会从 wheel 里
+    丢掉。而安装脚本用的是 editable 安装（-e），它直接读源码目录，所以本地怎么试都是好的；
+    只有普通安装之后才会发现 site-packages 里没有这个文件，
+    于是每个界面请求都抛 FileNotFoundError——服务起来了，页面却打不开。
+    """
+    import tomllib
+    root = Path(__file__).resolve().parent.parent
+    cfg = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    data = cfg["tool"]["setuptools"]["package-data"]
+    assert any("web" in pattern for pattern in data["jancode_agent"]), data
+
+
 def test_界面文件确实被打包进服务():
     body = _index_html()
     assert b"<!DOCTYPE html>" in body
     assert "JanCode Agent" in body.decode("utf-8")
+
+
+def test_serve_用传进来的配置而不是重新读一遍(monkeypatch, tmp_path):
+    """服务端必须用命令行装配好的配置。
+
+    回归的是这个 bug：--web 以前只把供应商**名字**传过去，服务端于是重新读环境变量
+    和配置文件，结果命令行给的 --api-key/--base-url/--model 全部失效，
+    --no-bash/--no-subagents 也被丢掉——用户以为禁掉了 shell，其实没禁。
+    """
+    from jancode_agent import server as sm
+    from jancode_agent.config import AgentConfig, ProviderConfig
+
+    cfg = AgentConfig(
+        provider=ProviderConfig(name="t", base_url="http://127.0.0.1:1/v1",
+                                model="cli-模型", api_key="sk-cli"),
+        workspace=tmp_path, max_steps=1, allow_bash=False, allow_subagents=False,
+    )
+
+    class FakeHTTPD:
+        def __init__(self, addr, handler):
+            pass
+
+        def serve_forever(self):
+            raise KeyboardInterrupt      # 立刻结束，不真的监听
+
+        def server_close(self):
+            pass
+
+    monkeypatch.setattr(sm, "ThreadingHTTPServer", FakeHTTPD)
+    assert sm.serve(port=0, config=cfg, open_browser=False) == 0
+    assert sm.Handler.config is cfg, "服务端没有采用传入的配置"
+    assert sm.Handler.config.allow_bash is False
+    assert sm.Handler.config.allow_subagents is False
 
 
 def _free_port() -> int:

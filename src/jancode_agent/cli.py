@@ -158,12 +158,14 @@ def main(argv: list[str] | None = None) -> int:
         config = replace(config, allow_subagents=False)
 
     if args.web:
-        # 图形界面在 server 内部自行校验密钥，这里不重复检查
+        # 图形界面在 server 内部自行校验密钥，这里不重复检查。
+        # 必须把上面装配好的 config 整个传进去：只传供应商名字的话，
+        # --api-key / --base-url / --model / --no-bash / --no-subagents
+        # 这些命令行覆盖会静默失效（服务端会重新从环境变量和配置文件读一遍）。
         from .server import serve
         return serve(
             port=args.port,
-            workspace=workspace,
-            provider=args.provider,
+            config=config,
             open_browser=not args.no_open,
         )
 

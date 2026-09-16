@@ -117,19 +117,32 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765, workspace: Path | None = None,
-          provider: str | None = None, open_browser: bool = True) -> int:
-    """启动本地服务。只监听回环地址——这是本机工具，不该暴露到局域网。"""
-    Handler.config = load_config(provider_name=provider, workspace=workspace or Path.cwd())
+          provider: str | None = None, open_browser: bool = True,
+          config: AgentConfig | None = None) -> int:
+    """启动本地服务。只监听回环地址——这是本机工具，不该暴露到局域网。
+
+    config 是命令行已经装配好的配置（含 --api-key/--base-url/--model 等覆盖），
+    有就直接用；没有才按 provider 名字现查一遍。
+    两种都留着是为了不破坏直接调 serve() 的用法。
+
+    为什么必须能传：以前这里只会拿到供应商**名字**，于是界面重新去读环境变量和
+    配置文件——用参数给密钥的人看到的是「未提供 API 密钥」，而 --no-bash、
+    --no-subagents 这些开关更是被静默丢掉，用户以为禁掉了其实没有。
+    """
+    Handler.config = config or load_config(
+        provider_name=provider, workspace=workspace or Path.cwd())
     if not Handler.config.provider.api_key:
         print("未提供 API 密钥。请设置环境变量 JANCODE_API_KEY 后重试。")
         return 2
 
     httpd = ThreadingHTTPServer((host, port), Handler)
     url = f"http://{host}:{port}/"
-    print(f"JanCode Agent 界面已启动：{url}")
-    print(f"工作目录 {Handler.config.workspace}")
-    print(f"模型 {Handler.config.provider.model} @ {Handler.config.provider.base_url}")
-    print("按 Ctrl+C 停止。\n")
+    # 每行都 flush：输出重定向到文件时 stdout 是块缓冲，不 flush 的话
+    # 用户（和读日志的脚本）要等缓冲区满才看得到"已启动"。
+    print(f"JanCode Agent 界面已启动：{url}", flush=True)
+    print(f"工作目录 {Handler.config.workspace}", flush=True)
+    print(f"模型 {Handler.config.provider.model} @ {Handler.config.provider.base_url}", flush=True)
+    print("按 Ctrl+C 停止。\n", flush=True)
 
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()

@@ -7,11 +7,32 @@
     而「--no-subagents 到底有没有把工具摘掉」也只有看真实请求体才算数。
 """
 
+import os
+import socket
 import subprocess
 import sys
+import urllib.request
+from pathlib import Path
 
 from tests import mock_server
 from tests.mock_server import call, chat_reply, start
+
+# 子进程一律用仓库里的源码跑，和 pyproject 里 pytest 的 pythonpath = ["src"] 保持一致。
+# 不加这一句的话，子进程会去 import 已经装进 site-packages 的那份副本——
+# 那份是上次安装时的快照，改了源码它不会跟着变，测试于是测的是旧代码。
+SRC = str(Path(__file__).resolve().parent.parent / "src")
+
+
+def _child_env() -> dict:
+    env = dict(os.environ)
+    env["PYTHONPATH"] = SRC + os.pathsep + env.get("PYTHONPATH", "")
+    return env
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
 def run_cli(workspace, script, *extra):
@@ -22,7 +43,7 @@ def run_cli(workspace, script, *extra):
             [sys.executable, "-m", "jancode_agent.cli",
              "--base-url", base, "--api-key", "test-key",
              "--workspace", str(workspace), *extra, "帮我查个东西"],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True, text=True, timeout=120, env=_child_env(),
         )
     finally:
         httpd.shutdown()
@@ -91,3 +112,47 @@ def test_关闭子智能体后模型根本拿不到这个工具(tmp_path):
     names = [t.get("function", {}).get("name") for t in tools]
     assert "task" not in names, names
     assert "read_file" in names, "其它工具不该被一起摘掉"
+
+
+def test_图形界面用命令行给的密钥和地址(tmp_path):
+    """--web 必须吃命令行参数。
+
+    回归的是这个 bug：--web 以前只把供应商名字交给服务端，服务端重新去读环境变量和
+    配置文件，于是「用 --api-key 给密钥」的人得到一句「未提供 API 密钥」——
+    参数看起来是支持的，实际没接线。
+    """
+    port = _free_port()
+    proc = subprocess.Popen(
+        [sys.executable, "-u", "-m", "jancode_agent.cli",
+         "--web", "--no-open", "--port", str(port),
+         "--api-key", "sk-cli", "--base-url", "http://127.0.0.1:9/v1",
+         "--model", "cli-模型", "--workspace", str(tmp_path)],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        env=_child_env(),
+    )
+    try:
+        banner = ""
+        while True:
+            # 读到启动信息打印完（最后一行是「按 Ctrl+C 停止」）或进程退出为止。
+            # 不能看见「已启动」就停——模型和地址是在它后面才打印的。
+            line = proc.stdout.readline()
+            if not line:
+                break
+            banner += line
+            if "Ctrl+C" in line:
+                break
+        assert "已启动" in banner, f"界面没起来：{banner}"
+        # 这两条是 bug 的正面证据：命令行给的模型和地址真的传到了服务端
+        assert "cli-模型" in banner, banner
+        assert "http://127.0.0.1:9/v1" in banner, banner
+
+        # 页面本身也要真的能打开（在此之前界面从未被真跑过）
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=15) as resp:
+            html = resp.read().decode("utf-8")
+        assert "子智能体" in html, "界面上应当能看到子智能体这件事"
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()

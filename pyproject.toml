@@ -28,10 +28,22 @@ dependencies = ["httpx>=0.27"]
 dev = ["pytest>=8", "pytest-asyncio>=0.24"]
 
 [project.scripts]
+# 两个名字都给：安装脚本创建的启动命令叫 jancode-agent，文档里也是这么写的，
+# 而 pip 安装只会生成 pyproject 里声明的命令。缺了别名的话，
+# 用 pip 安装的人照着 README 敲 jancode-agent 会得到 command not found。
 jancode = "jancode_agent.cli:main"
+jancode-agent = "jancode_agent.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# 界面文件必须显式声明成包数据，否则它不会进 wheel：
+# setuptools 默认只打包 .py，web/index.html 会被静默丢掉。
+# 症状很隐蔽——editable 安装（安装脚本用的 -e）直接读源码目录，一切正常；
+# 只有普通安装或 wheel 之后才会发现 site-packages 里没有这个文件，
+# 于是 jancode --web 每个请求都报 FileNotFoundError。
+[tool.setuptools.package-data]
+jancode_agent = ["web/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
