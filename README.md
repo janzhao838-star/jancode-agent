@@ -12,6 +12,31 @@
 
 ## 安装
 
+### 一键安装（推荐，不需要懂命令行）
+
+**macOS / Linux**
+
+```bash
+curl -sL https://raw.githubusercontent.com/janzhao838-star/jancode-agent/main/scripts/install.sh | bash
+```
+
+**Windows**（在 PowerShell 里运行）
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/janzhao838-star/jancode-agent/main/scripts/install.ps1 | iex
+```
+
+装完关掉窗口重开一个终端，就能用了：
+
+```bash
+jancode-agent --web
+```
+
+脚本会自己处理：找 Python（版本不够会告诉你怎么装）、下载源码、建独立环境
+（不动系统 Python）、失败时自动换国内镜像、创建启动命令并加进 PATH。
+
+### 手动安装
+
 ```bash
 git clone https://github.com/janzhao838-star/jancode-agent.git
 cd jancode-agent
