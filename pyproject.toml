@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jancode-agent"
+version = "0.1.0"
+description = "JanCode Agent —— 开源终端 AI 编程助手，面向国内大模型与自建中转站"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "janzhao" }]
+keywords = ["ai", "agent", "coding-assistant", "llm", "deepseek", "openai-compatible"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Software Development",
+]
+
+# 运行期依赖刻意保持极少：只用标准库即可启动。
+# httpx 用于异步 HTTP；不引入任何 agent 框架，避免被上游绑定。
+dependencies = ["httpx>=0.27"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[project.scripts]
+jancode = "jancode_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

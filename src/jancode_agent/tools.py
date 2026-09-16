@@ -1,0 +1,388 @@
+"""工具系统。
+
+智能体的能力边界完全由这里决定。设计原则：
+
+1. 每个工具都要有清晰的成功/失败信号——模型靠返回值判断下一步，
+   返回含糊的成功会导致它在错误方向上反复尝试。
+2. 失败返回的是「给模型看的说明」，不是 Python 异常堆栈。
+   模型看不懂 traceback，但看得懂「文件不存在，可用 list_dir 查看」。
+3. 所有文件路径都限制在工作目录内。越界的读写直接拒绝，
+   不做「尽力而为」的尝试。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import shutil
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable
+
+# 单次读取文件的行数上限。超过时截断并明确告知模型，
+# 否则一个巨大的文件会把上下文直接撑爆。
+MAX_READ_LINES = 2000
+# 搜索结果条数上限
+MAX_GREP_HITS = 200
+
+
+@dataclass
+class ToolResult:
+    ok: bool
+    output: str
+
+    def render(self) -> str:
+        return self.output
+
+
+class ToolError(Exception):
+    """工具参数错误。会被转成给模型看的提示。"""
+
+
+class Toolbox:
+    """工具集合。绑定到一个工作目录。"""
+
+    def __init__(
+        self,
+        workspace: Path,
+        allow_bash: bool = True,
+        bash_timeout: float = 120.0,
+        max_output: int = 20_000,
+    ):
+        self.workspace = Path(workspace).resolve()
+        self.allow_bash = allow_bash
+        self.bash_timeout = bash_timeout
+        self.max_output = max_output
+
+    # ---------- 路径安全 ----------
+
+    def _safe(self, raw: str) -> tuple[Path | None, ToolResult | None]:
+        """把 _resolve 的异常转成给模型的失败结果。
+
+        所有公开方法都必须经由这里解析路径，否则越界检查会因入口不同而失效。
+        """
+        try:
+            return self._resolve(raw), None
+        except ToolError as exc:
+            return None, ToolResult(False, str(exc))
+
+    def _resolve(self, raw: str) -> Path:
+        """把用户/模型给的路径解析到工作目录内。
+
+        越界一律拒绝。注意用 resolve() 之后再判断，
+        这样符号链接指向外面也能被拦住。
+        """
+        if not raw or not raw.strip():
+            raise ToolError("路径不能为空。")
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = self.workspace / candidate
+        try:
+            resolved = candidate.resolve()
+        except OSError as exc:
+            raise ToolError(f"无法解析路径 {raw!r}：{exc}") from exc
+
+        if resolved != self.workspace and self.workspace not in resolved.parents:
+            raise ToolError(
+                f"路径 {raw!r} 超出工作目录 {self.workspace}。只能操作工作目录内的文件。"
+            )
+        return resolved
+
+    def _clip(self, text: str) -> str:
+        if len(text) <= self.max_output:
+            return text
+        return text[: self.max_output] + f"\n…（输出过长，已截断，共 {len(text)} 字符）"
+
+    # ---------- 工具实现 ----------
+
+    async def read_file(self, path: str, offset: int = 1, limit: int = MAX_READ_LINES) -> ToolResult:
+        target, err = self._safe(path)
+        if err:
+            return err
+        assert target is not None
+        if not target.exists():
+            return ToolResult(False, f"文件不存在：{path}。可以先用 list_dir 查看目录内容。")
+        if target.is_dir():
+            return ToolResult(False, f"{path} 是目录，不是文件。请用 list_dir。")
+
+        try:
+            text = target.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return ToolResult(False, f"读取 {path} 失败：{exc}")
+
+        lines = text.splitlines()
+        total = len(lines)
+        start = max(1, int(offset))
+        count = max(1, min(int(limit), MAX_READ_LINES))
+        chunk = lines[start - 1 : start - 1 + count]
+
+        # 带行号返回：模型后续要改代码时，行号是定位锚点
+        numbered = "\n".join(f"{start + i:>5}\t{ln}" for i, ln in enumerate(chunk))
+        head = f"{path} 共 {total} 行，显示第 {start}–{start + len(chunk) - 1} 行：\n"
+        if start + len(chunk) - 1 < total:
+            numbered += f"\n…（还有 {total - (start + len(chunk) - 1)} 行未显示，可用 offset 继续读）"
+        return ToolResult(True, self._clip(head + numbered))
+
+    async def write_file(self, path: str, content: str) -> ToolResult:
+        target, err = self._safe(path)
+        if err:
+            return err
+        assert target is not None
+        existed = target.exists()
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            return ToolResult(False, f"写入 {path} 失败：{exc}")
+        verb = "覆盖" if existed else "新建"
+        return ToolResult(True, f"已{verb} {path}（{len(content)} 字符，{content.count(chr(10)) + 1} 行）。")
+
+    async def edit_file(self, path: str, old: str, new: str, replace_all: bool = False) -> ToolResult:
+        """按字面量替换。
+
+        刻意要求 old 唯一匹配：如果出现多次，说明模型对上下文判断有误，
+        此时强行替换很可能改错地方。让它提供更长的上下文再来一次更安全。
+        """
+        target, err = self._safe(path)
+        if err:
+            return err
+        assert target is not None
+        if not target.exists():
+            return ToolResult(False, f"文件不存在：{path}")
+        try:
+            text = target.read_text(encoding="utf-8")
+        except OSError as exc:
+            return ToolResult(False, f"读取 {path} 失败：{exc}")
+
+        hits = text.count(old)
+        if hits == 0:
+            return ToolResult(False, f"在 {path} 中找不到要替换的内容。请先 read_file 确认原文。")
+        if hits > 1 and not replace_all:
+            return ToolResult(
+                False,
+                f"要替换的内容在 {path} 里出现了 {hits} 次，无法确定改哪一处。"
+                f"请提供更长的上下文使其唯一，或指定 replace_all=true 全部替换。",
+            )
+
+        updated = text.replace(old, new, -1 if replace_all else 1)
+        try:
+            target.write_text(updated, encoding="utf-8")
+        except OSError as exc:
+            return ToolResult(False, f"写回 {path} 失败：{exc}")
+        return ToolResult(True, f"已修改 {path}（替换 {hits if replace_all else 1} 处）。")
+
+    async def list_dir(self, path: str = ".") -> ToolResult:
+        target, err = self._safe(path)
+        if err:
+            return err
+        assert target is not None
+        if not target.exists():
+            return ToolResult(False, f"目录不存在：{path}")
+        if not target.is_dir():
+            return ToolResult(False, f"{path} 不是目录。请用 read_file。")
+
+        try:
+            entries = sorted(target.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
+        except OSError as exc:
+            return ToolResult(False, f"列目录失败：{exc}")
+
+        if not entries:
+            return ToolResult(True, f"{path} 是空目录。")
+
+        lines = []
+        for p in entries[:400]:
+            if p.is_dir():
+                lines.append(f"  {p.name}/")
+            else:
+                try:
+                    size = p.stat().st_size
+                except OSError:
+                    size = 0
+                lines.append(f"  {p.name}  ({size} 字节)")
+        if len(entries) > 400:
+            lines.append(f"  …（另有 {len(entries) - 400} 项未显示）")
+        return ToolResult(True, f"{path} 内容：\n" + "\n".join(lines))
+
+    async def grep(self, pattern: str, path: str = ".", include: str = "") -> ToolResult:
+        target, err = self._safe(path)
+        if err:
+            return err
+        assert target is not None
+        try:
+            regex = __import__("re").compile(pattern)
+        except Exception as exc:
+            return ToolResult(False, f"正则表达式无法编译：{exc}")
+
+        hits: list[str] = []
+        files = [target] if target.is_file() else [
+            p for p in target.rglob("*") if p.is_file()
+        ]
+        for f in files:
+            if include and not f.match(include):
+                continue
+            # 跳过常见的大目录，避免把时间浪费在依赖上
+            if any(part in {".git", "node_modules", "__pycache__", ".venv", "target", "dist"} for part in f.parts):
+                continue
+            try:
+                if f.stat().st_size > 2_000_000:
+                    continue
+                text = f.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            for i, line in enumerate(text.splitlines(), 1):
+                if regex.search(line):
+                    rel = f.relative_to(self.workspace) if self.workspace in f.parents else f
+                    hits.append(f"{rel}:{i}: {line.strip()[:200]}")
+                    if len(hits) >= MAX_GREP_HITS:
+                        break
+            if len(hits) >= MAX_GREP_HITS:
+                break
+
+        if not hits:
+            return ToolResult(True, f"没有匹配 {pattern!r} 的内容。")
+        body = "\n".join(hits)
+        if len(hits) >= MAX_GREP_HITS:
+            body += f"\n…（已达 {MAX_GREP_HITS} 条上限，可缩小 path 或改用更精确的 pattern）"
+        return ToolResult(True, body)
+
+    async def bash(self, command: str) -> ToolResult:
+        if not self.allow_bash:
+            return ToolResult(False, "当前配置禁用了 shell 命令执行。")
+
+        # 明显破坏性的命令直接拒绝。这里不做完备的沙箱——
+        # 真要好隔离应该上容器，但至少拦住最常见的误操作。
+        lowered = command.lower()
+        for danger in ("rm -rf /", "mkfs", "dd if=", ":(){", "shutdown", "reboot"):
+            if danger in lowered:
+                return ToolResult(False, f"命令包含危险操作 {danger!r}，已拒绝执行。")
+
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                cwd=str(self.workspace),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            )
+        except OSError as exc:
+            return ToolResult(False, f"无法启动命令：{exc}")
+
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=self.bash_timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return ToolResult(False, f"命令超时（{self.bash_timeout} 秒）已被终止：{command}")
+
+        text = (out or b"").decode("utf-8", errors="replace")
+        code = proc.returncode or 0
+        if code != 0:
+            return ToolResult(False, f"命令退出码 {code}：\n{self._clip(text)}")
+        return ToolResult(True, self._clip(text) if text.strip() else "（命令无输出，执行成功）")
+
+    # ---------- 对外接口 ----------
+
+    def specs(self) -> list[dict[str, Any]]:
+        """OpenAI function-calling 格式的工具声明。"""
+        def obj(props: dict[str, Any], required: list[str]) -> dict[str, Any]:
+            return {"type": "object", "properties": props, "required": required}
+
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "读取文件内容，带行号返回。修改文件前应先用它确认原文。",
+                    "parameters": obj(
+                        {
+                            "path": {"type": "string", "description": "相对工作目录的路径"},
+                            "offset": {"type": "integer", "description": "起始行号，从 1 开始"},
+                            "limit": {"type": "integer", "description": "最多读取多少行"},
+                        },
+                        ["path"],
+                    ),
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "write_file",
+                    "description": "写入文件，会覆盖已有内容。新建文件用它。",
+                    "parameters": obj(
+                        {
+                            "path": {"type": "string", "description": "相对工作目录的路径"},
+                            "content": {"type": "string", "description": "完整文件内容"},
+                        },
+                        ["path", "content"],
+                    ),
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "edit_file",
+                    "description": "在文件里做字面量替换。要替换的内容必须唯一，否则会失败。",
+                    "parameters": obj(
+                        {
+                            "path": {"type": "string"},
+                            "old": {"type": "string", "description": "要被替换的原文"},
+                            "new": {"type": "string", "description": "替换成的内容"},
+                            "replace_all": {"type": "boolean", "description": "是否替换全部匹配"},
+                        },
+                        ["path", "old", "new"],
+                    ),
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_dir",
+                    "description": "列出目录内容，用于了解项目结构。",
+                    "parameters": obj({"path": {"type": "string"}}, []),
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "grep",
+                    "description": "用正则搜索文件内容，返回匹配行与行号。",
+                    "parameters": obj(
+                        {
+                            "pattern": {"type": "string", "description": "正则表达式"},
+                            "path": {"type": "string", "description": "搜索范围，默认整个工作目录"},
+                            "include": {"type": "string", "description": "文件名 glob，如 *.py"},
+                        },
+                        ["pattern"],
+                    ),
+                },
+            },
+        ]
+        if self.allow_bash:
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": "bash",
+                    "description": "在工作目录执行 shell 命令。用于运行测试、构建、查看状态。",
+                    "parameters": obj({"command": {"type": "string"}}, ["command"]),
+                },
+            })
+        return tools
+
+    async def call(self, name: str, arguments: dict[str, Any]) -> ToolResult:
+        """按名字分发。参数缺失时返回提示而不是抛异常。"""
+        handler: Callable[..., Any] | None = getattr(self, name, None)
+        available = {t["function"]["name"] for t in self.specs()}
+        if handler is None or name not in available:
+            return ToolResult(False, f"没有名为 {name!r} 的工具。可用：{'、'.join(sorted(available))}")
+        try:
+            return await handler(**arguments)
+        except TypeError as exc:
+            return ToolResult(False, f"调用 {name} 的参数不对：{exc}")
+        except ToolError as exc:
+            return ToolResult(False, str(exc))
+
+    # 说明：安全边界（_resolve 的越界检查）必须对「所有调用路径」生效，
+    # 所以每个公开工具方法自己兜住 ToolError，而不是指望调用方去捕获。
+    # 早前只有 call() 捕获，直接调 read_file 时异常会穿透——
+    # 也就是说边界是否生效取决于从哪进来，这不可接受。
