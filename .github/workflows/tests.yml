@@ -1,0 +1,36 @@
+name: tests
+
+# 只做一件事：推送和 PR 时把测试跑一遍。
+# 三个 Python 版本都本地验过，不是照抄模板填的。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # 用普通安装而不是 -e：这样能顺带验证打包配置是对的。
+      # 界面文件忘记声明成包数据时，-e 看不出来，普通安装能看出来。
+      - name: 安装
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+
+      - name: 跑测试
+        run: python -m pytest tests/ -q
+
+      # 单独确认界面文件真的进了包——这是踩过的坑，值得多盯一眼。
+      - name: 确认界面文件已进包
+        run: python -c "from jancode_agent.server import _index_html; assert b'<!DOCTYPE html>' in _index_html()"
