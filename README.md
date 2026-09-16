@@ -17,13 +17,22 @@
 **macOS / Linux**
 
 ```bash
-curl -sL https://raw.githubusercontent.com/janzhao838-star/jancode-agent/main/scripts/install.sh | bash
+curl -fsSL -o install.sh https://raw.githubusercontent.com/janzhao838-star/jancode-agent/main/scripts/install.sh
+bash install.sh
 ```
 
 **Windows**（在 PowerShell 里运行）
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/janzhao838-star/jancode-agent/main/scripts/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/janzhao838-star/jancode-agent/main/scripts/install.ps1 -OutFile install.ps1
+.\install.ps1
+```
+
+先下载、再运行，中间可以把脚本打开看一眼。这个项目的卖点之一就是配置透明，
+安装脚本不该是个黑盒。想一步到位也可以，效果完全一样：
+
+```bash
+curl -sL https://raw.githubusercontent.com/janzhao838-star/jancode-agent/main/scripts/install.sh | bash
 ```
 
 装完关掉窗口重开一个终端，就能用了：
@@ -31,6 +40,9 @@ iwr -useb https://raw.githubusercontent.com/janzhao838-star/jancode-agent/main/s
 ```bash
 jancode-agent --web
 ```
+
+`jancode` 和 `jancode-agent` 是两个等价的命令名，安装脚本创建前者，pip 安装生成后者，
+敲哪个都行。
 
 脚本会自己处理：找 Python（版本不够会告诉你怎么装）、下载源码、建独立环境
 （不动系统 Python）、失败时自动换国内镜像、创建启动命令并加进 PATH。
@@ -199,7 +211,8 @@ jancode --no-subagents "你的任务"
 
 ```bash
 pip install -e ".[dev]"
-pytest          # 64 项，含一个用假 OpenAI 服务跑真实 HTTP 的端到端测试
+pytest          # 71 项。既有用假客户端驱动循环的单元测试，
+                # 也有起真进程、真 HTTP 服务跑整个命令行的端到端测试
 ```
 
 ## 许可
