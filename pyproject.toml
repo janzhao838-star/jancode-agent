@@ -36,3 +36,5 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# 测试要 import 包自身与 tests.mock_server，两者都需在路径上
+pythonpath = ["src", "."]
