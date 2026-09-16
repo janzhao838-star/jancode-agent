@@ -29,7 +29,13 @@ iwr -useb https://raw.githubusercontent.com/janzhao838-star/jancode-agent/main/s
 ```
 
 先下载、再运行，中间可以把脚本打开看一眼。这个项目的卖点之一就是配置透明，
-安装脚本不该是个黑盒。想一步到位也可以，效果完全一样：
+安装脚本不该是个黑盒。如果 PowerShell 说「禁止运行脚本」，用这条绕过（只对本次生效）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+想一步到位也可以，效果完全一样：
 
 ```bash
 curl -sL https://raw.githubusercontent.com/janzhao838-star/jancode-agent/main/scripts/install.sh | bash

@@ -124,6 +124,57 @@ def test_serve_用传进来的配置而不是重新读一遍(monkeypatch, tmp_pa
     assert sm.Handler.config.allow_subagents is False
 
 
+def test_网页界面也能看到子智能体的过程(tmp_path):
+    """README 里承诺子智能体的每一步会实时冒泡到命令行和网页界面。
+
+    命令行那半边有端到端测试盯着了，这里补网页这半边：真起服务、真发 HTTP，
+    用假 OpenAI 服务脚本化一段「主派活 → 子干活 → 主收尾」，
+    检查推给界面的 NDJSON 里确实有带 subagent 标记的事件——界面就靠这个标记做缩进。
+    只测字段名对得上是不够的（那有专门的契约测试），这里要的是「真能跑出这种事件」。
+    """
+    from jancode_agent.config import AgentConfig, ProviderConfig
+    from tests import mock_server
+    from tests.mock_server import call, chat_reply
+
+    base, upstream = mock_server.start([
+        chat_reply(tool_calls=[call("t1", "task", {
+            "description": "查文件", "prompt": "读 note.txt，告诉我里面写了什么"})]),
+        chat_reply(tool_calls=[call("c1", "read_file", {"path": "note.txt"})]),
+        chat_reply(content="note.txt 里写的是「秘密内容」"),
+        chat_reply(content="查到了：秘密内容"),
+    ])
+    (tmp_path / "note.txt").write_text("秘密内容", encoding="utf-8")
+
+    port = _free_port()
+    Handler.config = AgentConfig(
+        provider=ProviderConfig(name="t", base_url=base, model="m", api_key="k"),
+        workspace=tmp_path, max_steps=6,
+    )
+    from http.server import ThreadingHTTPServer
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/run",
+            data=json.dumps({"prompt": "帮我查个东西"}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            raw = resp.read().decode("utf-8")
+    finally:
+        httpd.shutdown()
+        upstream.shutdown()
+
+    events = [json.loads(line) for line in raw.split("\n") if line.strip()]
+    assert events and events[-1]["kind"] == "done", events
+
+    sub_events = [e for e in events if e.get("subagent")]
+    assert sub_events, f"界面收不到任何带子智能体标记的事件：{events}"
+    # 子智能体的工具调用和它的结论都要能到界面上
+    assert any(e["kind"] == "tool" for e in sub_events), sub_events
+    assert "查文件" in {e["subagent"] for e in sub_events}, sub_events
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
