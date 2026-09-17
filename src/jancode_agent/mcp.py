@@ -191,6 +191,14 @@ class MCPClient:
         assert self.proc and self.proc.stdout
         deadline = time.time() + self.timeout
         while time.time() < deadline:
+            # readline 本身没有超时：进程活着但一直不输出的话（比如手滑
+            # 填了个 sleep、或某个不说话的 GUI 程序），这里会永久挂住，
+            # deadline 永远检查不到。先用 select 等数据到达再读。
+            import select
+            ready, _, _ = select.select([self.proc.stdout], [], [],
+                                        max(0.0, deadline - time.time()))
+            if not ready:
+                break
             line = self.proc.stdout.readline()
             if not line:
                 raise MCPError("服务已退出" + (": " + self.stderr_tail() if self._stderr else ""))
