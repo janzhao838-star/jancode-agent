@@ -518,7 +518,10 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
   }
 
   async function run(prompt) {
-    if (busy || !prompt) return;
+    // 允许插话：运行中也能继续发。上一版只解禁了按钮，没动这里，
+    // 所以点得动但发不出去——闸门在这个 busy 判断上。
+    // 服务端是多线程的，能同时跑多轮；发送按钮的禁用状态也已不再拦。
+    if (!prompt) return;
     var turn = { prompt: prompt, answer: "", tools: [], error: "", status: "", ts: Date.now() };
     pushTurn(turn);
     cur.title = cur.title; renderSide(); renderMain();
