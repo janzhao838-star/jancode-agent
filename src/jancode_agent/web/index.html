@@ -1734,6 +1734,146 @@ main,.main,#main{overflow:hidden}
   setInterval(function(){try{fix();}catch(e){}},900);
 })();
 </script>
+
+<style>
+#mg-cron{padding:22px 26px 60px}
+#view-cron{overflow-y:auto!important;min-height:0!important;display:none}
+#mg-cron .it{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid #ececf1;border-radius:12px;padding:14px 16px;margin-bottom:10px}
+#mg-cron .b{height:32px;padding:0 13px;border-radius:8px;border:1px solid #e3e3e8;background:#fff;font-size:13px;cursor:pointer;color:#4b5563}
+#mg-cron .b:hover{border-color:#c9b8ff;color:#5b3ee8}
+#mg-mcpform{margin-top:14px;background:#fff;border:1px solid #ececf1;border-radius:12px;padding:16px 18px}
+#mg-mcpform input{width:100%;height:36px;border:1px solid #ececf1;border-radius:9px;padding:0 10px;font-size:13px;margin-bottom:8px}
+</style>
+<script>
+/* 定时任务：单独一页。数据还是 /api/automations，但只展示带定时的，
+   并且把「下次什么时候跑」算出来给用户看。 */
+(function(){
+  function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
+  function post(b){return fetch('/api/automations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json();});}
+  function human(sec){
+    if(sec==null)return '—';
+    var m=Math.round(sec/60);
+    if(m<1)return '不到 1 分钟';
+    if(m<60)return m+' 分钟后';
+    var h=Math.round(m/60);
+    if(h<24)return h+' 小时后';
+    return Math.round(h/24)+' 天后';
+  }
+  var view=null;
+  function ensureView(){
+    if(view)return view;
+    view=document.getElementById('view-cron');
+    if(!view){
+      view=el('div','view');view.id='view-cron';
+      var host=document.getElementById('view-chat');
+      (host&&host.parentNode?host.parentNode:document.body).appendChild(view);
+    }
+    return view;
+  }
+  function ensureNav(){
+    if(document.getElementById('mg-nav-cron'))return;
+    var auto=document.getElementById('mg-nav-auto');
+    if(!auto)return;
+    var nav=auto.cloneNode(true);
+    nav.id='mg-nav-cron';nav.textContent='定时任务';
+    var svg=auto.querySelector('svg');if(svg)nav.insertBefore(svg.cloneNode(true),nav.firstChild);
+    auto.parentNode.insertBefore(nav,auto.nextSibling);
+    nav.onclick=function(e){
+      e.preventDefault();e.stopPropagation();
+      document.querySelectorAll('.view').forEach(function(v){v.style.display='none';});
+      document.querySelectorAll('[data-view]').forEach(function(i){if(i.id!=='mg-nav-cron')i.classList.remove('active','on');});
+      nav.classList.add('active');
+      ensureView().style.display='block';
+      load();
+    };
+    document.querySelectorAll('[data-view]').forEach(function(i){
+      if(i.id==='mg-nav-cron')return;
+      i.addEventListener('click',function(){if(view)view.style.display='none';});
+    });
+  }
+  function render(d){
+    var box=ensureView();box.innerHTML='';
+    var wrap=el('div');wrap.id='mg-cron';
+    var h=el('div',null,'定时任务');h.style.cssText='font-size:19px;font-weight:650;margin-bottom:4px';
+    wrap.appendChild(h);
+    var s=el('div',null,'到点由本机调度器触发，不需要开着界面。时间写法：每 30 分钟 / 每小时 / 每天 09:00');
+    s.style.cssText='font-size:13px;color:#6b7280;margin-bottom:16px';
+    wrap.appendChild(s);
+    var rows=(d.automations||[]).filter(function(a){return a.schedule;});
+    if(!rows.length){
+      var e=el('div',null,'还没有定时任务。去「自动化(RPA)」页建一个，填上时间就会出现在这里。');
+      e.style.cssText='font-size:13.5px;color:#6b7280;padding:16px 0';
+      wrap.appendChild(e);
+    }
+    rows.forEach(function(a){
+      var it=el('div','it');
+      var left=el('div');left.style.cssText='flex:1;min-width:0';
+      left.appendChild(el('div',null,a.name)).style.cssText='font-size:14.5px;font-weight:600';
+      var m=el('div',null,(a.enabled?'已启用':'已停用')+' · '+a.schedule+' · 下次 '+(a.enabled?human(a.next_in):'（停用中）')
+        +(a.last_run?(' · 上次 '+new Date(a.last_run*1000).toLocaleString('zh-CN')):' · 还没跑过'));
+      m.style.cssText='font-size:12.5px;color:#9aa1ab;margin-top:4px';
+      left.appendChild(m);
+      it.appendChild(left);
+      var b1=el('button','b',a.enabled?'暂停':'启用');
+      b1.onclick=function(){post({name:a.name,prompt:a.prompt,schedule:a.schedule,enabled:!a.enabled}).then(load);};
+      var b2=el('button','b','立即运行');
+      b2.onclick=function(){
+        b2.textContent='运行中…';
+        fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({prompt:a.prompt,history:[]})}).then(function(){b2.textContent='立即运行';load();});
+      };
+      it.appendChild(b1);it.appendChild(b2);
+      wrap.appendChild(it);
+    });
+    box.appendChild(wrap);
+  }
+  function load(){fetch('/api/automations').then(function(r){return r.json();}).then(render).catch(function(){});}
+  setInterval(function(){try{ensureNav();}catch(e){}},1200);
+})();
+</script>
+<script>
+/* MCP 自定义服务：带密钥输入。有些服务（搜索类）必须填 key 才能用，
+   之前只能手改配置文件。 */
+(function(){
+  function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
+  function inject(){
+    var grid=document.getElementById('mg-grid');
+    if(!grid||grid.dataset.mcp!=='1'||document.getElementById('mg-mcpform'))return;
+    var f=el('div');f.id='mg-mcpform';f.style.gridColumn='1/-1';
+    f.appendChild(el('div',null,'自定义 MCP 服务（需要密钥的填在下面）')).style.cssText='font-size:14px;font-weight:600;margin-bottom:10px';
+    var rows=[['mcp-name','服务名字，例如 Tavily'],['mcp-cmd','启动命令，例如 npx'],
+              ['mcp-args','参数，空格分开：-y @modelcontextprotocol/server-xxx'],
+              ['mcp-env','环境变量，一行一个 KEY=VALUE（密钥写这里）']];
+    rows.forEach(function(r){
+      var i=el('input');i.id=r[0];i.placeholder=r[1];f.appendChild(i);
+    });
+    var bar=el('div');bar.style.cssText='display:flex;gap:10px;align-items:center';
+    var b=el('button','b','保存并启动');b.style.cssText='height:34px;padding:0 16px;background:linear-gradient(135deg,#7c5cff,#35c3e8);color:#fff;border:none;border-radius:9px;cursor:pointer';
+    var tip=el('span','');tip.style.cssText='font-size:12.5px;color:#9aa1ab';
+    bar.appendChild(b);bar.appendChild(tip);f.appendChild(bar);
+    b.onclick=function(){
+      var name=f.querySelector('#mcp-name').value.trim();
+      var cmd=f.querySelector('#mcp-cmd').value.trim();
+      if(!name||!cmd){tip.textContent='名字和命令必填';return;}
+      var env={};
+      f.querySelector('#mcp-env').value.split('\n').forEach(function(line){
+        var i=line.indexOf('=');if(i>0)env[line.slice(0,i).trim()]=line.slice(i+1).trim();
+      });
+      tip.textContent='启动中…（可能要下载）';
+      fetch('/api/mcp',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'add',name:name,command:cmd,
+          args:f.querySelector('#mcp-args').value.trim().split(/\s+/).filter(Boolean),env:env})})
+        .then(function(r){return r.json();}).then(function(d){
+          if(!d.ok){tip.textContent='失败：'+(d.error||'');return;}
+          var s=(d.servers||[]).filter(function(x){return x.name===name;})[0]||{};
+          tip.textContent=s.running?('已启动，'+s.tools.length+' 个工具'):('已保存但没起来：'+(s.error||''));
+        });
+    };
+    grid.appendChild(f);
+  }
+  setInterval(function(){try{inject();}catch(e){}},900);
+})();
+</script>
 </body>
 </html>
 
