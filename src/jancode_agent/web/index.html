@@ -517,7 +517,35 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
     sendBtn.textContent = on ? "执行中…" : "发送";
   }
 
-  async function run(prompt) {
+  // 插话改成「排队」而不是真并发：live 是全局的流式渲染状态，
+  // 两轮同时跑会互相覆盖，第二轮的回答写进第一轮的格子，看起来像没反应。
+  // 排队的体感一样（消息立刻进列表），但渲染不会串。
+  var mgQueue = [];
+  function run(prompt) {
+    if (busy || live) {
+      mgQueue.push(prompt);
+      var b = document.getElementById("mg-queue");
+      if (b) {
+        b.style.display = "block";
+        b.textContent = "已排队 " + mgQueue.length + " 条，这轮结束后自动跑";
+      }
+      if (hint) hint.textContent = "已排队 " + mgQueue.length + " 条";
+      return;
+    }
+    return runNow(prompt);
+  }
+  async function mgDrain() {
+    if (busy || live || !mgQueue.length) return;
+    var next = mgQueue.shift();
+    var b = document.getElementById("mg-queue");
+    if (b) {
+      if (mgQueue.length) b.textContent = "还剩 " + mgQueue.length + " 条排队";
+      else b.style.display = "none";
+    }
+    await runNow(next);
+  }
+
+  async function runNow(prompt) {
     // 允许插话：运行中也能继续发。上一版只解禁了按钮，没动这里，
     // 所以点得动但发不出去——闸门在这个 busy 判断上。
     // 服务端是多线程的，能同时跑多轮；发送按钮的禁用状态也已不再拦。
@@ -565,6 +593,7 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
     live = null;
     setBusy(false);
     hint.textContent = "就绪";
+    mgDrain();
     save(); renderSide(); renderMain();
     notify(turn);
   }
@@ -2127,6 +2156,13 @@ main,.main,#main{overflow:hidden}
     document.querySelectorAll('button').forEach(function(b){
       if(b.disabled&&b.id!=='mg-stop'){b.disabled=false;b.removeAttribute('disabled');}
     });
+    // 运行中把发送按钮恢复成「发送」，并提示可以插话（消息会排队）。
+    // 否则按钮停在「执行中…」，用户根本不会去点。
+    var sb=document.getElementById('send');
+    if(sb&&(sb.textContent||'').indexOf('执行中')>=0&&!sb.dataset.mgFixed){
+      sb.textContent='发送（可插话）';sb.dataset.mgFixed='1';
+      sb.addEventListener('blur',function(){delete sb.dataset.mgFixed;});
+    }
   },400);
   var orig=window.fetch;
   window.fetch=function(url,opts){
