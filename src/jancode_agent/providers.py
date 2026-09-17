@@ -154,6 +154,11 @@ class Client:
 
         try:
             resp = await self._http.post(url, headers=self._headers(), json=payload)
+            # 网关按机器限并发时会返回 429，多半等几秒就好。自动重试一次，
+            # 比让用户看到「并发用满」然后自己重发体验好得多。
+            if resp.status_code == 429:
+                await asyncio.sleep(3)
+                resp = await self._http.post(url, headers=self._headers(), json=payload)
         except httpx.HTTPError as exc:
             raise ProviderError(f"连接 {url} 失败：{exc}") from exc
 

@@ -242,7 +242,11 @@ class Agent:
             await self._client.__aenter__()
 
         self.messages.append(Message(role="user", content=prompt))
-        specs = self.toolbox.specs() + manager.specs()
+        # MCP 服务是按需启动的子进程，npx 冷启动要几秒到几十秒。
+        # 直接在事件循环里调用会把整个任务堵住（对外表现就是「一直执行中」），
+        # 所以丢到线程里去等。
+        mcp_specs = await asyncio.to_thread(manager.specs)
+        specs = self.toolbox.specs() + mcp_specs
         seen: list[tuple[str, str]] = []  # 重复调用检测
 
         for step_no in range(1, self.config.max_steps + 1):

@@ -1923,6 +1923,169 @@ main,.main,#main{overflow:hidden}
   setInterval(function(){try{inject();rebuild();}catch(e){}},700);
 })();
 </script>
+
+<script>
+/* 任务进行中显示已用时。
+   之前只有「执行中…」三个字，慢的时候完全看不出是死是活——
+   用户只能干等。现在把秒数报出来：只要数字在走，就说明还活着。 */
+(function(){
+  var timer=null, started=0, badge=null;
+  function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
+  function show(){
+    if(!badge){
+      badge=el('div');badge.id='mg-progress';
+      badge.style.cssText='position:fixed;right:22px;bottom:96px;z-index:9999;background:rgba(31,35,40,.88);color:#fff;font-size:12.5px;padding:7px 13px;border-radius:9px;pointer-events:none;font-variant-numeric:tabular-nums';
+      document.body.appendChild(badge);
+    }
+    badge.style.display='block';
+    if(!started)started=Date.now();
+    var s=((Date.now()-started)/1000).toFixed(0);
+    badge.textContent='任务进行中 · 已用时 '+s+' 秒'+(s>60?'（还在等模型返回）':'');
+  }
+  function hide(){ if(badge)badge.style.display='none'; started=0; }
+  var orig=window.fetch;
+  window.fetch=function(url,opts){
+    var isRun=String(url).indexOf('/api/run')>=0;
+    if(isRun&&opts){
+      started=0;show();
+      if(timer)clearInterval(timer);
+      timer=setInterval(show,500);
+    }
+    var pr=orig.call(this,url,opts);
+    if(isRun){
+      pr.then(function(){ if(timer)clearInterval(timer); hide(); })
+        .catch(function(){ if(timer)clearInterval(timer); hide(); });
+    }
+    return pr;
+  };
+})();
+</script>
+
+<style>
+#mg-plus{width:32px;height:32px;border-radius:9px;border:1px solid #ececf1;background:#fff;font-size:17px;line-height:1;color:#4b5563;cursor:pointer;margin-right:8px}
+#mg-plus:hover{border-color:#c9b8ff;color:#5b3ee8}
+#mg-menu{position:fixed;z-index:9998;background:#fff;border:1px solid #ececf1;border-radius:12px;box-shadow:0 10px 30px rgba(20,20,40,.12);padding:6px;min-width:210px;display:none}
+#mg-menu .it{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:8px;font-size:13.5px;color:#3d434c;cursor:pointer}
+#mg-menu .it:hover{background:#f6f5ff;color:#5b3ee8}
+#mg-menu .sep{height:1px;background:#f1f1f5;margin:4px 6px}
+#mg-menu .sub{max-height:260px;overflow:auto;display:none;border-top:1px solid #f1f1f5;margin-top:4px;padding-top:4px}
+#mg-menu .sub .it{font-size:13px}
+#mg-menu .hint{font-size:11.5px;color:#9aa1ab;padding:2px 11px 6px}
+</style>
+<script>
+/* 输入框旁边的「＋」菜单：添加文件或文件夹 / 技能 / 插件 / 专家 / 计划模式。
+   技能、专家、插件的数据都来自接口本身，不是假的列表。 */
+(function(){
+  function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
+  function inputBox(){
+    return document.querySelector('textarea')||document.querySelector('input[type=text]')||document.querySelector('[contenteditable=true]');
+  }
+  function append(text){
+    var box=inputBox();if(!box)return;
+    if(box.tagName==='TEXTAREA'||box.tagName==='INPUT'){
+      var cur=box.value||'';
+      box.value=cur+(cur.trim()?'\n':'')+text;
+      box.dispatchEvent(new Event('input',{bubbles:true}));
+    }else{
+      box.textContent=(box.textContent||'')+text;
+      box.dispatchEvent(new Event('input',{bubbles:true}));
+    }
+    box.focus();
+  }
+  var menu=null, planMode=false;
+  function close(){if(menu)menu.style.display='none';}
+  function open(anchor){
+    if(!menu){
+      menu=el('div');menu.id='mg-menu';document.body.appendChild(menu);
+      document.addEventListener('click',function(e){
+        if(menu&&!menu.contains(e.target)&&e.target.id!=='mg-plus')close();
+      });
+    }
+    menu.innerHTML='';
+    var title=el('div','hint','给这次任务加点东西');
+    menu.appendChild(title);
+
+    var sub=el('div','sub');
+
+    var fileItem=el('div','it','📎  添加文件或文件夹');
+    fileItem.onclick=function(){
+      var path=window.prompt('输入文件或文件夹的路径（多个用逗号分隔）');
+      if(path){append('（参考这些文件：'+path+'）');close();}
+    };
+    menu.appendChild(fileItem);
+
+    var skillItem=el('div','it','✦  技能  ▸');
+    skillItem.onclick=function(){
+      sub.style.display='block';sub.innerHTML='';
+      fetch('/api/skills').then(function(r){return r.json();}).then(function(d){
+        var rows=(d.skills||[]).slice(0,20);
+        if(!rows.length){sub.appendChild(el('div','hint','还没有安装技能，去「插件&技能」页装一个'));return;}
+        rows.forEach(function(s){
+          var i=el('div','it','· '+s.name);
+          i.onclick=function(){append('请用「'+s.name+'」技能来做这件事。');close();};
+          sub.appendChild(i);
+        });
+      });
+    };
+    menu.appendChild(skillItem);
+
+    var pluginItem=el('div','it','⛭  插件  ▸');
+    pluginItem.onclick=function(){
+      sub.style.display='block';sub.innerHTML='';
+      fetch('/api/mcp').then(function(r){return r.json();}).then(function(d){
+        var rows=d.servers||[];
+        if(!rows.length){sub.appendChild(el('div','hint','还没有插件，去「插件&技能」的 MCP 栏添加'));return;}
+        rows.forEach(function(s){
+          var i=el('div','it','· '+s.name+'（'+s.tools.length+' 个工具）');
+          i.onclick=function(){append('可以用「'+s.name+'」这个插件的工具。');close();};
+          sub.appendChild(i);
+        });
+      });
+    };
+    menu.appendChild(pluginItem);
+
+    var expertItem=el('div','it','☰  专家  ▸');
+    expertItem.onclick=function(){
+      sub.style.display='block';sub.innerHTML='';
+      fetch('/api/agents').then(function(r){return r.json();}).then(function(d){
+        var rows=(d.agents||[]).concat((d.builtins||[]).filter(function(x){return x.installed;}));
+        if(!rows.length){sub.appendChild(el('div','hint','还没有添加专家，去「数字专家」页加一个'));return;}
+        rows.forEach(function(a){
+          var i=el('div','it','· '+a.name);
+          i.onclick=function(){append('请以「'+a.name+'」的身份和标准来做这件事。');close();};
+          sub.appendChild(i);
+        });
+      });
+    };
+    menu.appendChild(expertItem);
+
+    menu.appendChild(el('div','sep'));
+
+    var planItem=el('div','it',(planMode?'✓ ':'')+'☰  计划模式');
+    planItem.onclick=function(){
+      planMode=!planMode;
+      append(planMode?'先只给计划，把步骤列清楚，不要动手改任何东西；我确认后再执行。':'（取消计划模式）');
+      close();
+    };
+    menu.appendChild(planItem);
+
+    menu.appendChild(sub);
+    var box=inputBox();
+    var r=(box||anchor).getBoundingClientRect();
+    menu.style.left=Math.max(12,r.left)+'px';
+    menu.style.bottom=(window.innerHeight-r.top+8)+'px';
+    menu.style.display='block';
+  }
+  function inject(){
+    var btn=document.getElementById('modelBtn')||document.getElementById('mpick');
+    if(!btn||document.getElementById('mg-plus'))return;
+    var plus=el('button',null,'＋');plus.id='mg-plus';plus.title='添加文件/技能/插件/专家/计划模式';
+    plus.onclick=function(e){e.stopPropagation();if(menu&&menu.style.display==='block')close();else open(plus);};
+    btn.parentNode.insertBefore(plus,btn);
+  }
+  setInterval(function(){try{inject();}catch(e){}},900);
+})();
+</script>
 </body>
 </html>
 
