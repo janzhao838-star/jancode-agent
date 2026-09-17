@@ -2029,7 +2029,9 @@ main,.main,#main{overflow:hidden}
       b2.onclick=function(){
         b2.textContent='运行中…';
         fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({prompt:a.prompt,history:[]})}).then(function(){b2.textContent='立即运行';load();});
+          body:JSON.stringify({prompt:a.prompt,history:[]})})
+          .then(function(){b2.textContent='立即运行';load();})
+          .catch(function(){b2.textContent='立即运行';});
       };
       it.appendChild(b1);it.appendChild(b2);
       wrap.appendChild(it);
@@ -2076,7 +2078,8 @@ main,.main,#main{overflow:hidden}
           if(!d.ok){tip.textContent='失败：'+(d.error||'');return;}
           var s=(d.servers||[]).filter(function(x){return x.name===name;})[0]||{};
           tip.textContent=s.running?('已启动，'+s.tools.length+' 个工具'):('已保存但没起来：'+(s.error||''));
-        });
+        })
+        .catch(function(){tip.textContent='保存失败：连不上本地服务';});
     };
     grid.appendChild(f);
   }
