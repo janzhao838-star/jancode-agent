@@ -47,6 +47,18 @@ def parse_daily(schedule: str) -> tuple[int, int] | None:
     return None
 
 
+def _advance(moment: float, step: float, now: float) -> float:
+    """把错过的时间点直接跳到下一个将来，不补跑。
+
+    补跑会在关了很久的机器上一次性触发很多次——既花额度又吓人。
+    宁可跳过，也不要突然跑一堆。
+    """
+    if moment > now:
+        return moment
+    missed = int((now - moment) // step) + 1
+    return moment + missed * step
+
+
 def next_run(schedule: str, last_run: float, now: float | None = None) -> float | None:
     """算出下一次该跑的时间戳。写法不认识就返回 None。
 
@@ -60,12 +72,12 @@ def next_run(schedule: str, last_run: float, now: float | None = None) -> float 
     if interval is not None:
         if not last_run:
             return now
-        return last_run + interval
+        return _advance(last_run + interval, interval, now)
 
     if is_hourly(schedule):
         if not last_run:
             return now
-        return last_run + 3600
+        return _advance(last_run + 3600, 3600, now)
 
     daily = parse_daily(schedule)
     if daily is not None:
@@ -75,6 +87,11 @@ def next_run(schedule: str, last_run: float, now: float | None = None) -> float 
         if when.timestamp() <= (last_run or now - 86400):
             when += timedelta(days=1)
         if when.timestamp() <= now and last_run:
+            when += timedelta(days=1)
+        # 兜底：无论哪种情况，返回的都必须是将来。
+        # 之前「从没跑过 + 今天的点已经过去」会返回今天那个已经过去的时间，
+        # 调用方拿去算「还有多久跑」会得到负数，调度判断也跟着错。
+        while when.timestamp() <= now:
             when += timedelta(days=1)
         return when.timestamp()
 
