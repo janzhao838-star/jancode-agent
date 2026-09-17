@@ -368,6 +368,13 @@ class Agent:
         seen: list[tuple[str, str]] = []  # 重复调用检测
 
         for step_no in range(1, self.config.max_steps + 1):
+            # 每轮开始前也查一次插话和停止：长工具（bash 冷启动、
+            # MCP npx 首跑）可能跑几十秒，期间用户的请求不该被无视。
+            if stop is not None and stop.is_set():
+                stopped = True
+                break
+            # 插话不在这里消化——流式循环里的中断逻辑会把它变成
+            # 「带修正重答」；这里只负责在长工具结束后把停止请求立刻兑现。
             # 上下文自动归档：超预算先把老旧的大块输出压成桩，
             # 不至于长任务跑到一半被中转站按超长拒单。
             self._maybe_archive()
