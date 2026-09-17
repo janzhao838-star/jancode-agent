@@ -215,9 +215,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/agents":
             from dataclasses import asdict
 
-            from .library import list_agents
+            from .library import builtin_agents, list_agents
 
-            self._json({"ok": True, "agents": [asdict(a) for a in list_agents()]})
+            self._json({"ok": True, "agents": [asdict(a) for a in list_agents()],
+                        "builtins": builtin_agents()})
             return
         if self.path == "/api/automations":
             from dataclasses import asdict
@@ -277,10 +278,26 @@ class Handler(BaseHTTPRequestHandler):
         upsert_skill(name, str(payload.get("description") or ""), content)
         self._json({"ok": True})
 
+    def _install_builtin_agent(self, name: str, remove: bool) -> None:
+        from .library import delete_agent, install_builtin_agent
+
+        if remove:
+            ok = delete_agent(name)
+            self._json({"ok": ok, "error": "" if ok else "没有添加过这个专家"})
+            return
+        ok = install_builtin_agent(name)
+        self._json({"ok": ok, "error": "" if ok else "没有这个内置专家"})
+
     def _edit_agent(self) -> None:
         from .library import delete_agent, upsert_agent
 
         payload = self._body()
+        if payload.get("install"):
+            self._install_builtin_agent(str(payload["install"]), False)
+            return
+        if payload.get("uninstall"):
+            self._install_builtin_agent(str(payload["uninstall"]), True)
+            return
         target = str(payload.get("delete") or "").strip()
         if target:
             ok = delete_agent(target)
