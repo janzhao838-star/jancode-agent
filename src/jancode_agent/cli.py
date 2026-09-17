@@ -51,7 +51,7 @@ def _show_providers() -> None:
     for name, spec in sorted(BUILTIN_PROVIDERS.items()):
         print(f"  {name:<{width}}  {spec['label']}")
         print(f"  {'':<{width}}  {spec['base_url']}  默认模型 {spec['model']}")
-    print("\n用法：jancode --provider aionclaw \"你的任务\"")
+    print("\n用法：jancode --provider janzhao \"你的任务\"")
     print("密钥通过环境变量传入：export JANCODE_API_KEY=sk-...")
 
 

@@ -14,8 +14,8 @@ def clean_env(monkeypatch):
 
 
 def test_无配置文件时用内置默认(tmp_path):
-    cfg = load_config(path=tmp_path / "缺失.toml", provider_name="aionclaw")
-    assert cfg.provider.base_url in BUILTIN_PROVIDERS["aionclaw"]["base_url"]
+    cfg = load_config(path=tmp_path / "缺失.toml", provider_name="janzhao")
+    assert cfg.provider.base_url in BUILTIN_PROVIDERS["janzhao"]["base_url"]
     assert cfg.provider.model
 
 
@@ -27,14 +27,14 @@ def test_未知供应商给出可用列表(tmp_path):
 
 def test_配置文件覆盖预设(tmp_path, monkeypatch):
     p = tmp_path / "c.toml"
-    p.write_text('[provider]\nname = "aionclaw"\nmodel = "自定义模型"\n', encoding="utf-8")
+    p.write_text('[provider]\nname = "janzhao"\nmodel = "自定义模型"\n', encoding="utf-8")
     cfg = load_config(path=p)
     assert cfg.provider.model == "自定义模型"
 
 
 def test_环境变量优先级最高(tmp_path, monkeypatch):
     p = tmp_path / "c.toml"
-    p.write_text('[provider]\nname = "aionclaw"\napi_key = "文件里的"\n', encoding="utf-8")
+    p.write_text('[provider]\nname = "janzhao"\napi_key = "文件里的"\n', encoding="utf-8")
     monkeypatch.setenv("JANCODE_API_KEY", "环境变量的")
     cfg = load_config(path=p)
     assert cfg.provider.api_key == "环境变量的"

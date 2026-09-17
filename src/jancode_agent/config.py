@@ -20,19 +20,9 @@ DEFAULT_CONFIG_PATH = Path.home() / ".jancode-agent" / "config.toml"
 # 国内常见中转站与厂商的默认入口，供 --provider 快速切换。
 BUILTIN_PROVIDERS: dict[str, dict[str, str]] = {
     "janzhao": {
-        "base_url": "https://router.aionclaw.com/v1",
-        "model": "deepseek-v4-pro",
-        "label": "钧子AI",
-    },
-    "janzhao": {
         "base_url": "https://janzhao.cn:9090/v1",
-        "model": "deepseek-v3",
-        "label": "janzhao 自建网关",
-    },
-    "junzi": {
-        "base_url": "https://charlene.cat:9090/v1",
-        "model": "deepseek-v3",
-        "label": "钧子AI",
+        "model": "deepseek-v4-pro",
+        "label": "钧子AI 中转站",
     },
     "deepseek": {
         "base_url": "https://api.deepseek.com/v1",
@@ -163,7 +153,7 @@ def load_config(
 ) -> AgentConfig:
     """读取配置。文件不存在时回退到内置默认，不抛异常。
 
-    这样设计是为了让 `jancode --provider aionclaw` 在零配置下就能跑起来。
+    这样设计是为了让 `jancode --provider janzhao` 在零配置下就能跑起来。
     """
     path = path or DEFAULT_CONFIG_PATH
     raw: dict = {}

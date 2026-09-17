@@ -105,7 +105,7 @@ pip install -e .
 export JANCODE_API_KEY=你的密钥
 
 jancode --list-providers                  # 看有哪些内置供应商
-jancode --provider aionclaw "介绍一下这个项目"
+jancode --provider janzhao "介绍一下这个项目"
 jancode                                    # 交互模式
 jancode --web                              # 图形界面（浏览器里用）
 ```
@@ -130,7 +130,7 @@ jancode-agent --doctor
 
 ```
   ✗ 连接中转站
-      https://router.aionclaw.com/v1 拒绝了这个密钥（401）
+      https://janzhao.cn:9090/v1 拒绝了这个密钥（401）
 
       → 密钥无效或已过期。到中转站的「令牌」页面重新创建一个。
       → 站点原始报错：{"error":{"message":"Invalid token",...}}
@@ -240,7 +240,7 @@ jancode --no-subagents "你的任务"
 
 ## 实测过的对接情况
 
-对 `router.aionclaw.com` 发过真实请求，返回 401 且带中转站原始报错：
+对 `janzhao.cn:9090` 发过真实请求，返回 401 且带中转站原始报错：
 
 ```
 返回 401：{"error":{"code":"","message":"Invalid token...","type":"new_api_error"}}
