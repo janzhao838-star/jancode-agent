@@ -2161,7 +2161,8 @@ main,.main,#main{overflow:hidden}
 /* 工作模式选择：默认执行 / 计划模式 / 只读模式。
    靠 #mg-effort 定位（它由前一个脚本创建），不依赖原来的类名。 */
 (function(){
-  var MODES=[['','默认执行'],['plan','计划模式'],['readonly','只读模式']];
+  var MODES=[['','默认执行'],['plan','计划模式'],['readonly','只读模式'],
+             ['auto','全自动'],['sandbox','限定工作目录']];
   function inject(){
     var eff=document.getElementById('mg-effort');
     if(!eff||document.getElementById('mg-mode'))return;
@@ -2185,6 +2186,78 @@ main,.main,#main{overflow:hidden}
     return orig.call(this,url,opts);
   };
   setInterval(function(){try{inject();}catch(e){}},700);
+})();
+</script>
+
+<script>
+/* 本地模型自动发现：照着零度code做的，但不用后端——
+   页面本身就跑在本机，直接去敲常见推理服务的端口即可。
+   Ollama / LM Studio / vLLM 都对 localhost 开了 CORS，浏览器能直接读。 */
+(function(){
+  var SRV=[['Ollama',11434,'/api/tags',function(j){return (j.models||[]).map(function(m){return m.name;});},'http://127.0.0.1:11434/v1'],
+           ['LM Studio',1234,'/v1/models',function(j){return (j.data||[]).map(function(m){return m.id;});},'http://127.0.0.1:1234/v1'],
+           ['vLLM',8000,'/v1/models',function(j){return (j.data||[]).map(function(m){return m.id;});},'http://127.0.0.1:8000/v1'],
+           ['llama.cpp',8080,'/v1/models',function(j){return (j.data||[]).map(function(m){return m.id;});},'http://127.0.0.1:8080/v1']];
+  var card=null;
+  function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
+  function addProvider(name,url,model){
+    fetch('/api/providers',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name:name,label:name,base_url:url,model:model,api_key:'',wire_api:'chat'})})
+    .then(function(r){return r.json();}).then(function(d){
+      alert(d.ok===false?('添加失败：'+(d.error||'未知原因')):'已添加接入配置：'+name+' / '+model+'，去上面的下拉框切换即可');
+    }).catch(function(e){alert('添加失败：'+e);});
+  }
+  function scan(){
+    var out=document.getElementById('mg-scanout');
+    if(!out)return;
+    out.innerHTML='<div class="hint">正在扫描本机 11434 / 1234 / 8000 / 8080 …</div>';
+    var found=0, left=SRV.length;
+    SRV.forEach(function(s){
+      var ctrl=null;
+      try{ctrl=new AbortController();}catch(e){}
+      var timer=setTimeout(function(){try{ctrl.abort();}catch(e){}},2500);
+      fetch('http://127.0.0.1:'+s[1]+s[2],{signal:ctrl&&ctrl.signal,headers:{'Accept':'application/json'}})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        var names=s[3](j)||[];
+        if(names.length){
+          found++;
+          var box=el('div');box.style.cssText='margin:8px 0;padding:9px 11px;background:#fafaff;border:1px solid #eee;border-radius:9px';
+          box.appendChild(el('div',null,s[0]+'  '+s[4]+'  ·  '+names.length+' 个模型'));
+          names.slice(0,8).forEach(function(n){
+            var row=el('div');row.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:13px';
+            row.appendChild(el('span',null,'· '+n));
+            var b=el('button',null,'添加为接入配置');
+            b.style.cssText='font-size:12px;padding:3px 9px;border:1px solid #ddd;border-radius:7px;background:#fff;cursor:pointer';
+            b.onclick=function(){addProvider(s[0],s[4],n);};
+            row.appendChild(b);box.appendChild(row);
+          });
+          out.appendChild(box);
+        }
+      })
+      .catch(function(){})
+      .then(function(){
+        left--;
+        if(left===0&&found===0)out.innerHTML='<div class="hint">没发现本机推理服务。装了 Ollama / LM Studio 的话先把服务启动起来再扫。</div>';
+        else if(left===0&&found>0)out.querySelectorAll('.hint').forEach(function(h){h.remove();});
+      });
+    });
+  }
+  function inject(){
+    var host=document.getElementById('mg-prov');
+    if(!host||document.getElementById('mg-scancard'))return;
+    card=el('div');card.id='mg-scancard';
+    card.style.cssText='margin:14px 0;padding:14px 16px;border:1px solid #ececf1;border-radius:12px;background:#fff';
+    var h=el('div',null,'💻  本地模型（自动发现）');
+    h.style.cssText='font-weight:600;margin-bottom:4px';
+    card.appendChild(h);
+    card.appendChild(el('div','hint','扫描本机常见推理服务端口，扫到就能一键加为接入配置，不用手填地址。'));
+    var b=el('button',null,'扫描本机');b.style.cssText='margin-top:8px;padding:6px 14px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer';
+    b.onclick=scan;card.appendChild(b);
+    var out=el('div');out.id='mg-scanout';out.style.marginTop='6px';card.appendChild(out);
+    host.appendChild(card);
+  }
+  setInterval(function(){try{inject();}catch(e){}},1000);
 })();
 </script>
 </body>
