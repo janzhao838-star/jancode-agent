@@ -81,6 +81,10 @@ class AgentConfig:
     max_steps: int = 40
     # 工具输出回灌给模型前截断的最大字符数。
     max_tool_output: int = 20_000
+    # 工作模式：auto/sandbox/plan/readonly。
+    # 它不只进系统提示词，还由 Toolbox 在代码层做硬拦截——
+    # 只写提示词的话，模型不听话就直接动手改文件了。
+    mode: str = "auto"
     # 是否允许执行 shell 命令。默认允许，但可用配置关闭。
     allow_bash: bool = True
     # shell 命令超时（秒）。

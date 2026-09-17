@@ -780,6 +780,9 @@ class Handler(BaseHTTPRequestHandler):
                 "任何文件，也不要执行有副作用的命令。需要改动时把方案写出来让我确认。"
             ),
         }
+        # 模式先进 config：Toolbox 会拿它做代码级拦截。
+        # 不认识的模式一律当 auto，避免「写错了就变放行」这种意外。
+        config = replace(config, mode=mode if mode in MODES else "auto")
         if mode in MODES:
             base_extra = config.system_extra or ""
             config = replace(config, system_extra=(base_extra + "\n\n" + MODES[mode]).strip())

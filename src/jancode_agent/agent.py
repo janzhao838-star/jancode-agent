@@ -103,6 +103,7 @@ class Agent:
             # 比「留着但调用时报错」更省步数。
             allow_subagents=config.allow_subagents and depth < config.max_subagent_depth,
             spawn_subagent=self._spawn_subagent,
+            mode=config.mode,
         )
         self._client = client
         self._owns_client = client is None

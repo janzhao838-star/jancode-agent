@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -40,6 +41,24 @@ class ToolError(Exception):
     """工具参数错误。会被转成给模型看的提示。"""
 
 
+# 「只读」类工具：不产生任何副作用，计划/只读模式下放行。
+READ_ONLY_TOOLS = frozenset({"read_file", "list_dir", "grep"})
+
+# 这两种模式在代码层面禁止一切有副作用的工具。
+NO_SIDE_EFFECT_MODES = frozenset({"readonly", "plan"})
+
+# sandbox 模式判「有没有写入意图」用的关键词。
+_SANDBOX_WRITE_HINTS = (
+    " > ", " >> ", ">>", "tee ", " cp ", " mv ", " rm ", " mkdir ",
+    "touch ", "chmod ", "chown ", "dd ", "truncate "
+)
+
+# 绝对路径。故意排除前面是字母数字/点/冒号的，否则会把网址
+# （https://…）和模块路径当成文件路径误拦。反引号写成 x60，
+# 免得它把外层脚本截断。
+_ABSOLUTE = re.compile(r'(?<![\w.:-])(/[^\s\x22\x27\x60;|&()<>]+)')
+
+
 class Toolbox:
     """工具集合。绑定到一个工作目录。"""
 
@@ -51,6 +70,7 @@ class Toolbox:
         max_output: int = 20_000,
         allow_subagents: bool = False,
         spawn_subagent: Callable[[str, str], Any] | None = None,
+        mode: str = "auto",
     ):
         self.workspace = Path(workspace).resolve()
         self.allow_bash = allow_bash
@@ -60,6 +80,51 @@ class Toolbox:
         # 工具层只做参数校验和分发，这样 Toolbox 不需要知道模型客户端怎么来。
         self.allow_subagents = allow_subagents
         self.spawn_subagent = spawn_subagent
+        self.mode = (mode or "auto").strip().lower()
+
+    # ---------- 工作模式（代码级拦截） ----------
+
+    def policy_error(self, name: str) -> str | None:
+        """按工作模式拦截工具调用，返回拒绝原因，None 表示放行。
+
+        为什么要有这一层：四个模式原先只写进系统提示词。提示词是「请求」，
+        模型不听话就直接动手改文件了。这里是「拒绝」，两者缺一不可。
+        """
+        if self.mode in NO_SIDE_EFFECT_MODES and name not in READ_ONLY_TOOLS:
+            label = "计划" if self.mode == "plan" else "只读"
+            return (
+                f"当前是「{label}」模式，代码层面不允许执行 {name}。"
+                f"这是硬拦截而不是提示，改了提示词也绕不过去。"
+                f"确实需要改动，请先让用户在界面上切到「全自动」。"
+            )
+        return None
+
+    def _sandbox_bash_error(self, command: str) -> str | None:
+        """sandbox 模式下拒绝「看起来在往工作目录外写」的命令。
+
+        这里是尽力而为，不是真沙箱：shell 能做的事太多，没法在字符串层面
+        关进笼子。所以只拦最可能造成真实损失的一类——同时具备写入意图、
+        又出现了工作目录之外的绝对路径。只读命令（看 /etc/hosts、
+        which python）一律放行，否则正常工作都做不了。
+        """
+        if self.mode != "sandbox":
+            return None
+        padded = " " + command + " "
+        if not any(hint in padded for hint in _SANDBOX_WRITE_HINTS):
+            return None
+        for match in _ABSOLUTE.finditer(command):
+            raw = match.group(1)
+            try:
+                target = Path(raw).expanduser().resolve()
+            except OSError:
+                continue
+            if target != self.workspace and self.workspace not in target.parents:
+                return (
+                    f"「限定工作目录」模式下拒绝执行：命令里有写入意图，"
+                    f"又出现了工作目录之外的路径 {raw!r}。"
+                    f"要动这个位置，请先跟用户确认并切到「全自动」。"
+                )
+        return None
 
     # ---------- 路径安全 ----------
 
@@ -163,6 +228,9 @@ class Toolbox:
         return ToolResult(True, self._clip(head + numbered))
 
     async def write_file(self, path: str, content: str) -> ToolResult:
+        denial = self.policy_error("write_file")
+        if denial is not None:
+            return ToolResult(False, denial)
         target, err = self._safe(path)
         if err:
             return err
@@ -177,6 +245,9 @@ class Toolbox:
         return ToolResult(True, f"已{verb} {path}（{len(content)} 字符，{content.count(chr(10)) + 1} 行）。")
 
     async def edit_file(self, path: str, old: str, new: str, replace_all: bool = False) -> ToolResult:
+        denial = self.policy_error("edit_file")
+        if denial is not None:
+            return ToolResult(False, denial)
         """按字面量替换。
 
         刻意要求 old 唯一匹配：如果出现多次，说明模型对上下文判断有误，
@@ -286,6 +357,12 @@ class Toolbox:
         return ToolResult(True, body)
 
     async def bash(self, command: str) -> ToolResult:
+        denial = self.policy_error("bash")
+        if denial is not None:
+            return ToolResult(False, denial)
+        sandbox_denial = self._sandbox_bash_error(command)
+        if sandbox_denial is not None:
+            return ToolResult(False, sandbox_denial)
         if not self.allow_bash:
             return ToolResult(False, "当前配置禁用了 shell 命令执行。")
 
@@ -321,6 +398,9 @@ class Toolbox:
         return ToolResult(True, self._clip(text) if text.strip() else "（命令无输出，执行成功）")
 
     async def task(self, description: str = "", prompt: str = "") -> ToolResult:
+        denial = self.policy_error("task")
+        if denial is not None:
+            return ToolResult(False, denial)
         """把一段独立的子任务派给子智能体，只要它的最终结论。
 
         这里是「分发」，不是「实现」：真正的跑循环在 Agent 层。
@@ -473,6 +553,9 @@ class Toolbox:
         return tools
 
     async def save_skill(self, name: str = "", content: str = "", **extra: Any) -> ToolResult:
+        denial = self.policy_error("save_skill")
+        if denial is not None:
+            return ToolResult(False, denial)
         """把一段做法存进技能库。名字相同就更新，不会攒出一堆重复的。"""
         from .library import upsert_skill
 
@@ -489,6 +572,9 @@ class Toolbox:
         available = {t["function"]["name"] for t in self.specs()}
         if handler is None or name not in available:
             return ToolResult(False, f"没有名为 {name!r} 的工具。可用：{'、'.join(sorted(available))}")
+        denial = self.policy_error(name)
+        if denial is not None:
+            return ToolResult(False, denial)
         try:
             return await handler(**arguments)
         except TypeError as exc:
