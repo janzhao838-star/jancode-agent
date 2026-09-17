@@ -13,17 +13,56 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import threading
+import time
 import webbrowser
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import __version__
 from .agent import Agent
 from .config import load_config
 from .providers import ProviderError
 
 WEB_DIR = Path(__file__).parent / "web"
+
+# 界面里填的连接设置存这里。放服务端而不是浏览器存储，
+# 是因为这里面有密钥：浏览器的存储是明文、而且会被同源页面读走，
+# 文件能收紧到 600。
+SETTINGS_PATH = Path.home() / ".jancode-agent" / "desktop-settings.json"
+
+
+def _saved_settings() -> dict:
+    try:
+        data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def apply_saved_settings(config: AgentConfig) -> AgentConfig:
+    """把界面里保存过的设置补进配置。
+
+    双击启动的 app 没有终端，也就没有环境变量。不读这份文件的话，
+    用户每次打开都只看到「未提供 API 密钥」，而且界面上没有任何地方能填。
+
+    环境变量优先：命令行用户明确设了，就该按他说的来，不能被界面里的旧值盖掉。
+    """
+    from dataclasses import replace
+
+    saved = _saved_settings()
+    if not saved:
+        return config
+    provider = config.provider
+    if not os.environ.get("JANCODE_API_KEY") and saved.get("api_key"):
+        provider = replace(provider, api_key=str(saved["api_key"]))
+    if not os.environ.get("JANCODE_BASE_URL") and saved.get("base_url"):
+        provider = replace(provider, base_url=str(saved["base_url"]).rstrip("/"))
+    if not os.environ.get("JANCODE_MODEL") and saved.get("model"):
+        provider = replace(provider, model=str(saved["model"]))
+    return replace(config, provider=provider)
 
 
 def _index_html() -> bytes:
@@ -59,10 +98,265 @@ class Handler(BaseHTTPRequestHandler):
                 "label": p.label or p.name,
                 "workspace": str(self.config.workspace),
                 "has_key": bool(p.api_key),
+                "allow_bash": self.config.allow_bash,
+                "allow_subagents": self.config.allow_subagents,
+                "max_steps": self.config.max_steps,
+                "version": __version__,
             }
             self._send(200, json.dumps(payload, ensure_ascii=False).encode(), "application/json")
             return
+        if self.path == "/api/models":
+            self._models()
+            return
+        if self.path == "/api/settings":
+            self._get_settings()
+            return
+        if self.path.startswith("/api/files"):
+            self._files()
+            return
+        if self.path.startswith("/api/file?"):
+            self._file()
+            return
+        if self.path == "/api/tools":
+            self._tools()
+            return
+        if self.path == "/api/skills":
+            from dataclasses import asdict
+
+            from .library import list_skills
+
+            self._json({"ok": True, "skills": [asdict(s) for s in list_skills()]})
+            return
+        if self.path == "/api/agents":
+            from dataclasses import asdict
+
+            from .library import list_agents
+
+            self._json({"ok": True, "agents": [asdict(a) for a in list_agents()]})
+            return
+        if self.path == "/api/automations":
+            from dataclasses import asdict
+
+            from .library import list_automations
+            from .scheduler import next_run
+
+            items = []
+            now = time.time()
+            for item in list_automations():
+                row = asdict(item)
+                moment = next_run(item.schedule, item.last_run, now)
+                row["next_run"] = moment
+                row["schedule_ok"] = moment is not None
+                items.append(row)
+            self._json({"ok": True, "automations": items})
+            return
         self._send(404, b"not found", "text/plain")
+
+    def _body(self) -> dict:
+        try:
+            data = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+        except (ValueError, UnicodeDecodeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _edit_skill(self) -> None:
+        from .library import delete_skill, upsert_skill
+
+        payload = self._body()
+        target = str(payload.get("delete") or "").strip()
+        if target:
+            ok = delete_skill(target)
+            self._json({"ok": ok, "error": "" if ok else "没有这条技能"})
+            return
+        name = str(payload.get("name") or "").strip()
+        content = str(payload.get("content") or "").strip()
+        if not name or not content:
+            self._json({"ok": False, "error": "技能需要名字和内容"})
+            return
+        upsert_skill(name, str(payload.get("description") or ""), content)
+        self._json({"ok": True})
+
+    def _edit_agent(self) -> None:
+        from .library import delete_agent, upsert_agent
+
+        payload = self._body()
+        target = str(payload.get("delete") or "").strip()
+        if target:
+            ok = delete_agent(target)
+            self._json({"ok": ok, "error": "" if ok else "没有这个智能体"})
+            return
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            self._json({"ok": False, "error": "智能体需要名字"})
+            return
+        picked = payload.get("skills")
+        upsert_agent(name, str(payload.get("system_prompt") or ""),
+                     str(payload.get("model") or ""),
+                     [str(s) for s in picked] if isinstance(picked, list) else [])
+        self._json({"ok": True})
+
+    def _edit_automation(self) -> None:
+        from .library import delete_automation, upsert_automation
+        from .scheduler import next_run
+
+        payload = self._body()
+        target = str(payload.get("delete") or "").strip()
+        if target:
+            ok = delete_automation(target)
+            self._json({"ok": ok, "error": "" if ok else "没有这条自动化任务"})
+            return
+        name = str(payload.get("name") or "").strip()
+        schedule = str(payload.get("schedule") or "").strip()
+        if not name:
+            self._json({"ok": False, "error": "需要一个名字"})
+            return
+        # 时间写法先校验再存：存进去一个看不懂的写法，界面上看着是配好了，
+        # 实际永远不会触发——这种「配了但没生效」最难排查。
+        if schedule and next_run(schedule, 0.0, 0.0) is None:
+            self._json({"ok": False, "error": "时间写法不认识。支持：每 30 分钟 / 每小时 / 每天 09:00"})
+            return
+        upsert_automation(
+            name,
+            str(payload.get("prompt") or ""),
+            schedule,
+            bool(payload.get("enabled")),
+            str(payload.get("agent") or ""),
+            str(payload.get("model") or ""),
+        )
+        self._json({"ok": True})
+
+    def _query(self) -> dict:
+        from urllib.parse import parse_qs, urlparse
+
+        return {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
+
+    def _toolbox(self):
+        """按当前配置造一个工具箱。
+
+        文件浏览走它，是为了和工作目录边界共用同一套规则——
+        界面另写一套解析路径的逻辑，迟早会和工具的边界不一致，
+        那时候从界面上就能读到工作目录外的文件。
+        """
+        from .tools import Toolbox
+
+        return Toolbox(workspace=self.config.workspace)
+
+    def _files(self) -> None:
+        rel = self._query().get("path") or "."
+        entries, error = self._toolbox().entries(rel)
+        if error:
+            self._json({"ok": False, "error": error})
+            return
+        self._json({"ok": True, "path": rel, "entries": entries})
+
+    def _file(self) -> None:
+        rel = self._query().get("path") or ""
+        if not rel:
+            self._json({"ok": False, "error": "缺少 path"})
+            return
+        # 只给预览：整本大文件塞进界面没有任何意义，还会把窗口卡住。
+        result = asyncio.run(self._toolbox().read_file(rel, limit=400))
+        if not result.ok:
+            self._json({"ok": False, "error": result.text})
+            return
+        self._json({"ok": True, "path": rel, "text": result.text})
+
+    def _tools(self) -> None:
+        specs = self._toolbox().specs()
+        items = []
+        for spec in specs:
+            fn = spec.get("function") or {}
+            items.append({"name": fn.get("name", ""), "description": fn.get("description", "")})
+        self._json({"ok": True, "tools": items,
+                    "allow_bash": self.config.allow_bash,
+                    "allow_subagents": self.config.allow_subagents,
+                    "max_steps": self.config.max_steps})
+
+    def _get_settings(self) -> None:
+        """界面要的连接设置。密钥本身不回传，只回「有没有配」。"""
+        p = self.config.provider
+        self._json({
+            "ok": True,
+            "base_url": p.base_url,
+            "model": p.model,
+            "label": p.label or p.name,
+            "has_key": bool(p.api_key),
+            "key_from_env": bool(os.environ.get("JANCODE_API_KEY")),
+        })
+
+    def _save_settings(self) -> None:
+        """保存界面里填的连接设置，并让它在当前进程立即生效。"""
+        try:
+            payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+        except (ValueError, UnicodeDecodeError):
+            self._json({"ok": False, "error": "请求体不是 JSON"}, 400)
+            return
+        if not isinstance(payload, dict):
+            self._json({"ok": False, "error": "请求体不是对象"}, 400)
+            return
+
+        saved = _saved_settings()
+        for key in ("api_key", "base_url", "model"):
+            value = str(payload.get(key) or "").strip()
+            if value:
+                saved[key] = value
+        if not saved:
+            self._json({"ok": False, "error": "什么都没填"})
+            return
+
+        try:
+            SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+            SETTINGS_PATH.write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
+            os.chmod(SETTINGS_PATH, 0o600)  # 里面有密钥
+        except OSError as exc:
+            self._json({"ok": False, "error": f"保存失败：{exc}"})
+            return
+
+        # 立刻生效：不然用户填完还得重启一次 app，很容易以为没保存上。
+        Handler.config = apply_saved_settings(Handler.config)
+        self._json({"ok": True, "has_key": bool(Handler.config.provider.api_key),
+                    "model": Handler.config.provider.model,
+                    "base_url": Handler.config.provider.base_url})
+
+    def _models(self) -> None:
+        """把可用模型列给界面。
+
+        直接问中转站要 /v1/models，而不是写死一份清单：中转站的模型随时在变，
+        写死的清单第二天就是错的，用户照着选会选中一个用不了的模型。
+
+        拉不到时至少把当前模型和内置预设给出来——这个菜单不能是死的，
+        网络不通的时候用户更需要知道现在用的是哪个模型。
+        """
+        from .config import BUILTIN_PROVIDERS
+
+        p = self.config.provider
+        ids: list[str] = []
+        error = ""
+        try:
+            import httpx
+
+            resp = httpx.get(
+                f"{p.base_url.rstrip('/')}/models",
+                headers={"Authorization": f"Bearer {p.api_key}"},
+                timeout=15.0,
+            )
+            if resp.status_code < 400:
+                for item in (resp.json() or {}).get("data") or []:
+                    name = item.get("id")
+                    if name:
+                        ids.append(str(name))
+            else:
+                error = f"中转站返回 {resp.status_code}"
+        except Exception as exc:
+            error = f"连不上中转站：{exc}"
+
+        if p.model and p.model not in ids:
+            ids.insert(0, p.model)
+        if not ids:
+            spec = BUILTIN_PROVIDERS.get(p.name) or {}
+            ids = [str(spec.get("model") or p.model)]
+
+        self._json({"ok": True, "models": ids, "current": p.model, "error": error})
 
     def _json(self, payload: dict, code: int = 200) -> None:
         self._send(code, json.dumps(payload, ensure_ascii=False).encode(), "application/json")
@@ -116,6 +410,18 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/notify":
             self._notify()
             return
+        if self.path == "/api/settings":
+            self._save_settings()
+            return
+        if self.path == "/api/skills":
+            self._edit_skill()
+            return
+        if self.path == "/api/agents":
+            self._edit_agent()
+            return
+        if self.path == "/api/automations":
+            self._edit_automation()
+            return
         if self.path != "/api/run":
             self._send(404, b"not found", "text/plain")
             return
@@ -143,8 +449,32 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write((json.dumps(obj, ensure_ascii=False) + "\n").encode())
             self.wfile.flush()
 
+        # 本次任务用哪个角色、哪个模型、带哪些技能。
+        # 一律走 dataclasses.replace，不就地改 self.config —— 那是所有请求共用的，
+        # 改了会串到别的任务上。
+        from dataclasses import replace
+
+        from .library import find_agent, persona_prompt, skills_section
+
+        model = str(payload.get("model") or "").strip()
+        config = self.config
+
+        wanted = str(payload.get("agent") or "").strip()
+        persona = find_agent(wanted) if wanted else None
+        if persona is not None:
+            if not model and persona.model:
+                model = persona.model
+            config = replace(config, system_extra=persona_prompt(persona))
+        else:
+            # 没选角色时把技能全带上：技能是用户为了「以后都能用」写的，
+            # 不该因为这次忘了选角色就不生效。
+            config = replace(config, system_extra=skills_section())
+
+        if model and model != config.provider.model:
+            config = replace(config, provider=replace(config.provider, model=model))
+
         async def drive() -> None:
-            async with Agent(self.config) as agent:
+            async with Agent(config) as agent:
                 # 把界面上的历史对话恢复进上下文，保证多轮连续
                 from .providers import Message
                 for turn in history[-20:]:
@@ -184,8 +514,8 @@ def build_server(host: str = "127.0.0.1", port: int = 8765, workspace: Path | No
     并在窗口关掉时自己 shutdown。两者揉在一起的话，桌面版只能另抄一份出来，
     以后改一处忘一处。
     """
-    Handler.config = config or load_config(
-        provider_name=provider, workspace=workspace or Path.cwd())
+    Handler.config = apply_saved_settings(config or load_config(
+        provider_name=provider, workspace=workspace or Path.cwd()))
     if not Handler.config.provider.api_key:
         raise MissingApiKey(
             "未提供 API 密钥。请设置环境变量 JANCODE_API_KEY 后重试。")

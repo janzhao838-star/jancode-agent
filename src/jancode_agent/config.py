@@ -94,6 +94,10 @@ class AgentConfig:
     bash_timeout: float = 120.0
     # 工作目录边界：文件工具的读写不得越出此目录。
     workspace: Path = field(default_factory=Path.cwd)
+    # 追加到系统提示词末尾的内容：自定义智能体的角色设定、以及技能库。
+    # 放成配置里的一个字段，而不是让 server 去改 Agent 的内部状态——
+    # 命令行和子智能体也走同一条路径，谁都改得到。
+    system_extra: str = ""
     # 是否允许主智能体把子任务派给子智能体。关闭后 task 工具不再出现，
     # 系统提示词里也不会提它——说了有却调用不到，模型会反复空试。
     allow_subagents: bool = True

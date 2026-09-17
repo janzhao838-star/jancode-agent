@@ -125,6 +125,15 @@ def main(argv: list[str] | None = None) -> int:
         httpd.server_close()
         return _fail(f"本地服务在 20 秒内没有起来（端口 {port}）。")
 
+    # 自动化任务由桌面版负责调度：命令行/网页版是「用完就走」的用法，
+    # 在那里常驻一个定时器不符合预期，还会在用户不知情时花掉额度。
+    try:
+        from .scheduler import start as start_scheduler
+
+        start_scheduler(config)
+    except Exception as exc:  # 调度起不来不该让整个应用打不开
+        print(f"定时任务未启动：{exc}", file=sys.stderr, flush=True)
+
     if args.selftest:
         # 不开窗口，只确认「服务能起来 + 配置是对的」。CI 里没有显示器也能跑。
         print(f"服务已就绪：{url}", flush=True)

@@ -112,8 +112,11 @@ class Agent:
     def system_prompt(self) -> str:
         """按当前身份和配置拼系统提示词。"""
         if self.depth > 0 or not self.toolbox.allow_subagents:
-            return SUBAGENT_SYSTEM_PROMPT if self.depth > 0 else SYSTEM_PROMPT
-        return SYSTEM_PROMPT + SUBAGENT_SECTION
+            base = SUBAGENT_SYSTEM_PROMPT if self.depth > 0 else SYSTEM_PROMPT
+        else:
+            base = SYSTEM_PROMPT + SUBAGENT_SECTION
+        extra = (self.config.system_extra or "").strip()
+        return base + ("\n\n" + extra if extra else "")
 
     def child_config(self) -> AgentConfig:
         """子智能体用的配置。

@@ -95,6 +95,34 @@ class Toolbox:
             )
         return resolved
 
+    def entries(self, path: str = ".") -> tuple[list[dict[str, Any]], str]:
+        """列目录，返回结构化结果，出错时返回 (空列表, 原因)。
+
+        界面单独要这一份。让它去解析 list_dir 那段「给人看的文本」太脆了：
+        改个措辞就会把界面弄坏，而改的人根本不会想到界面依赖了它。
+        """
+        target, err = self._safe(path)
+        if err is not None:
+            return [], err.text
+        assert target is not None
+        if not target.exists():
+            return [], f"目录不存在：{path}"
+        if not target.is_dir():
+            return [], f"{path} 不是目录。"
+        try:
+            found = sorted(target.iterdir(), key=lambda q: (q.is_file(), q.name.lower()))
+        except OSError as exc:
+            return [], f"列目录失败：{exc}"
+
+        out: list[dict[str, Any]] = []
+        for q in found[:400]:
+            try:
+                size = 0 if q.is_dir() else q.stat().st_size
+            except OSError:
+                size = 0
+            out.append({"name": q.name, "dir": q.is_dir(), "size": size})
+        return out, ""
+
     def _clip(self, text: str) -> str:
         if len(text) <= self.max_output:
             return text
@@ -411,6 +439,27 @@ class Toolbox:
                     ),
                 },
             })
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "save_skill",
+                "description": (
+                    "把这次解决问题的方法记成技能，以后同类任务会自动带上。"
+                    "当你摸索出一个值得重复使用的做法（踩过的坑、约定的流程、"
+                    "这个项目的特殊规矩）时用它。日常琐事不要存。"
+                ),
+                "parameters": obj(
+                    {
+                        "name": {"type": "string", "description": "技能名，简短好认，例如「发版流程」"},
+                        "description": {"type": "string", "description": "一句话说明它解决什么问题",
+                                        "description_zh": ""},
+                        "content": {"type": "string",
+                                    "description": "具体做法，写成照着做就能复现的样子"},
+                    },
+                    ["name", "content"],
+                ),
+            },
+        })
         if self.allow_bash:
             tools.append({
                 "type": "function",
@@ -421,6 +470,17 @@ class Toolbox:
                 },
             })
         return tools
+
+    async def save_skill(self, name: str = "", content: str = "", **extra: Any) -> ToolResult:
+        """把一段做法存进技能库。名字相同就更新，不会攒出一堆重复的。"""
+        from .library import upsert_skill
+
+        title = (name or "").strip()
+        body = (content or "").strip()
+        if not title or not body:
+            return ToolResult(False, "save_skill 需要 name 和 content 两个参数。")
+        skill = upsert_skill(title, str(extra.get("description") or "").strip(), body)
+        return ToolResult(True, f"已记住技能「{skill.name}」，之后的同类任务会自动带上。")
 
     async def call(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         """按名字分发。参数缺失时返回提示而不是抛异常。"""
