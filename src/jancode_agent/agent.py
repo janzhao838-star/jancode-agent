@@ -271,16 +271,35 @@ class Agent:
             for tc in reply.tool_calls:
                 # 重复调用检测：同工具同参数连续出现，说明模型在打转
                 signature = (tc.name, json.dumps(tc.arguments, sort_keys=True, ensure_ascii=False))
-                if seen.count(signature) >= 2:
+                repeats = seen.count(signature)
+                if repeats >= 4:
+                    # 同一条命令连打四次以上才算打转，才真的中止。
                     note = (
-                        f"检测到重复调用 {tc.name} 且参数完全相同，已中止。"
-                        f"可能是任务无法按当前方式完成，请检查工作目录或换一种思路。"
+                        f"检测到重复调用 {tc.name} 且参数完全相同（第 {repeats + 1} 次），已中止。"
+                        f"换个思路，或者先说明为什么这条命令必须反复重试。"
                     )
                     self.messages.append(Message(
                         role="tool", content=note, tool_call_id=tc.id, name=tc.name,
                     ))
                     yield Step("error", tool_ok=False, text=note)
                     return
+                if repeats >= 1:
+                    # 第二次出现同样的调用：只提醒，不掐掉整个任务。
+                    # 控制设备时这太常见了——第一次 ssh 超时、命令没回显、
+                    # 服务刚起来还没就绪，都会让模型用同样的参数再试一次。
+                    # 直接中止会表现为「任务突然停止不工作」。
+                    self.messages.append(Message(
+                        role="tool",
+                        content=(
+                            "注意：你刚才已经用过完全相同的工具和参数（内容相同），"
+                            "再执行一次结果不会变。请先看上一次的输出："
+                            "如果是超时或没有回显，先检查连接和认证；"
+                            "如果是命令报错，改参数或换命令。不要原样重试。"
+                        ),
+                        tool_call_id=tc.id,
+                        name=tc.name,
+                    ))
+                    continue
                 seen.append(signature)
 
                 # 工具结果由「结束」那一步带回来（见 Step.result 的说明）
