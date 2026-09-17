@@ -61,6 +61,9 @@ class ProviderConfig:
     model: str
     api_key: str = ""
     label: str = ""
+    # 推理强度／速度档位：low / medium / high，空表示用服务端默认。
+    # 请求里以 reasoning_effort 传给后端；不支持的模型会忽略它。
+    effort: str = ""
     # 走哪种协议。国内厂商普遍用 chat；部分中转站支持 responses。
     wire_api: str = "chat"
     # 单次请求超时（秒）。模型推理可能很慢，默认给足。

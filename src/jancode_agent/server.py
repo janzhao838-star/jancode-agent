@@ -726,6 +726,7 @@ class Handler(BaseHTTPRequestHandler):
         from .library import disclaimer_for, find_agent, persona_prompt, skills_section
 
         model = str(payload.get("model") or "").strip()
+        effort = str(payload.get("effort") or "")[:16]
         config = self.config
 
         wanted = str(payload.get("agent") or "").strip()
@@ -743,6 +744,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if model and model != config.provider.model:
             config = replace(config, provider=replace(config.provider, model=model))
+        if effort:
+            config = replace(config, provider=replace(config.provider, effort=effort))
 
         last_answer = {"text": ""}
 

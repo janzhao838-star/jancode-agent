@@ -204,8 +204,14 @@ class Client:
             "temperature": self.provider.temperature,
         }
         if tools:
+            if getattr(self.provider, "effort", ""):
+                payload["reasoning"] = {"effort": self.provider.effort}
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+        # 推理强度：只有用户选了才发，空着就用服务端默认。
+        # 不要在没选的时候硬塞一个值——不支持的模型收到会直接报错。
+        if getattr(self.provider, "effort", ""):
+            payload["reasoning_effort"] = self.provider.effort
         return payload
 
     def _responses_payload(self, messages: list[Message], tools: list[dict[str, Any]] | None) -> dict[str, Any]:
