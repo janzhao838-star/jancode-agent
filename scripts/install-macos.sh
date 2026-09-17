@@ -5,7 +5,20 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/dist/JanCode 智能体.app"
-[ -d "$APP" ] || { echo "先运行 scripts/build-desktop.sh 打包"; exit 1; }
+
+# 必须重新打包再安装。
+# 之前这里只复制 dist 里的现成包，导致改了源码却装的是旧构建——
+# 界面上的新功能根本没进去，测试时看到的一直是旧版，白排查好几轮。
+# 必须先杀掉正在运行的旧实例。
+# 之前没有这一步：覆盖了 .app 之后 open 只是把旧窗口切到前面，
+# 内存里跑的还是旧代码，用户以为在测新版，其实一直在看旧界面。
+pkill -f "MacOS/JanCode 智能体" 2>/dev/null || true
+sleep 2
+
+echo "重新打包…"
+bash "$ROOT/scripts/build-desktop.sh" >/dev/null
+[ -d "$APP" ] || { echo "打包失败：dist 里没有产物"; exit 1; }
+echo "打包完成，开始安装。"
 
 # 先清扩展属性，否则签名会报 resource fork not allowed 而失败。
 # 不用 --deep：bundle 里没有 CodeResources，--deep 生成的资源封印
