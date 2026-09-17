@@ -608,6 +608,27 @@ class Handler(BaseHTTPRequestHandler):
             spec = BUILTIN_PROVIDERS.get(p.name) or {}
             ids = [str(spec.get("model") or p.model)]
 
+        # 把用户配过的模型并进来。
+        # 只问当前地址要 /models 是不够的：有些网关（自建的 DGX 就是）压根不返回
+        # 模型清单，用户切过一次中转站，之前配好的模型就在这个下拉框里消失了，
+        # 看着像「配置丢了」。所以：当前地址能拉到的 + 配过的 + 内置目录，全并进来。
+        try:
+            from .catalog import CATALOG
+            from .library import _load_json  # noqa: F401  (占位，见下)
+
+            rows, _active = load_providers()
+            for row in rows:
+                if row.get("model"):
+                    ids.append(str(row["model"]))
+            for group in CATALOG:
+                ids.extend(str(m) for m in group.get("models") or [])
+        except Exception:
+            pass
+        if p.model:
+            ids.append(p.model)
+        seen = set()
+        ids = [x for x in ids if not (x in seen or seen.add(x))]
+
         self._json({"ok": True, "models": ids, "current": p.model, "error": error})
 
     def _json(self, payload: dict, code: int = 200) -> None:
