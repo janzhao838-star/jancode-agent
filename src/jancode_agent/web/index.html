@@ -611,7 +611,14 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
     } else if (ev.kind === "answer") {
       if (ev.subagent) {
         turn.tools.push({ name: "子智能体结论", text: ev.text, ok: true, sub: ev.subagent });
-      } else {
+      } else if (ev.delta) {
+        // 流式增量：直接接在末尾，绝不能加换行。
+        // 之前这里不分增量还是整段，一律加换行，于是每个增量都另起一行，
+        // 看起来就是「几个字一行往下掉」。服务端一直带着 delta 标记，
+        // 是界面没用上。
+        turn.answer += ev.text;
+      } else if (ev.text) {
+        // 非流式的整段回答：另起一段
         turn.answer = (turn.answer ? turn.answer + "\n" : "") + ev.text;
       }
     } else if (ev.kind === "error") {
