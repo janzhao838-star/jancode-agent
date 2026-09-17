@@ -593,9 +593,9 @@ class Handler(BaseHTTPRequestHandler):
         # 只给预览：整本大文件塞进界面没有任何意义，还会把窗口卡住。
         result = asyncio.run(self._toolbox().read_file(rel, limit=400))
         if not result.ok:
-            self._json({"ok": False, "error": result.text})
+            self._json({"ok": False, "error": result.output})
             return
-        self._json({"ok": True, "path": rel, "text": result.text})
+        self._json({"ok": True, "path": rel, "text": result.output})
 
     def _tools(self) -> None:
         specs = self._toolbox().specs()

@@ -181,7 +181,7 @@ class Toolbox:
         """
         target, err = self._safe(path)
         if err is not None:
-            return [], err.text
+            return [], err.output
         assert target is not None
         if not target.exists():
             return [], f"目录不存在：{path}"
