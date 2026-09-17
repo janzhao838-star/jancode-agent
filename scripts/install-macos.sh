@@ -26,7 +26,15 @@ echo "打包完成，开始安装。"
 # they must be present"，那份包双击照样打不开。
 sign_bundle() {
   local APP="$1"
+  # iCloud 文件提供器会给 Python.framework 重打 fpfs 属性，光
+  # xattr -cr 一次常常不够——手工装时每次都要清两遍才签上。
+  # 实测固化三步：删 AppleDouble、逐文件清、定点删 fpfs/FinderInfo。
+  find "$APP" -name '._*' -delete 2>/dev/null || true
+  find "$APP" -name '.DS_Store' -delete 2>/dev/null || true
   xattr -cr "$APP" 2>/dev/null || true
+  find "$APP" -exec xattr -c {} \; 2>/dev/null || true
+  xattr -dr com.apple.fileprovider.fpfs#P "$APP" 2>/dev/null || true
+  xattr -dr com.apple.FinderInfo "$APP" 2>/dev/null || true
   find "$APP/Contents/MacOS" -type f -perm +111 2>/dev/null | while read -r f; do
     codesign --force --sign - "$f" >/dev/null 2>&1 || true
   done
@@ -36,7 +44,9 @@ sign_bundle() {
 
 sign_bundle "$APP"
 rm -rf "/Applications/JanCode 智能体.app"
-cp -R "$APP" "/Applications/"
+# ditto 不带扩展属性；cp -R 会把 fpfs 属性原样带进 /Applications，
+# 装完的包验证签名就失败。
+ditto "$APP" "/Applications/JanCode 智能体.app"
 sign_bundle "/Applications/JanCode 智能体.app"
 xattr -dr com.apple.quarantine "/Applications/JanCode 智能体.app" 2>/dev/null || true
 
