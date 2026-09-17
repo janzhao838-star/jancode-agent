@@ -515,8 +515,11 @@ def build_server(host: str = "127.0.0.1", port: int = 8765, workspace: Path | No
     并在窗口关掉时自己 shutdown。两者揉在一起的话，桌面版只能另抄一份出来，
     以后改一处忘一处。
     """
-    Handler.config = apply_saved_settings(config or load_config(
-        provider_name=provider, workspace=workspace or Path.cwd()))
+    # 刻意不在这里合并界面保存的设置：build_server 也会被命令行和网页版用到，
+    # 那边用户可能是用 --api-key/--base-url 明确指定的，被文件里的旧值盖掉
+    # 就是「我传了参数却不生效」。合并只发生在桌面版的入口（desktop.main）。
+    Handler.config = config or load_config(
+        provider_name=provider, workspace=workspace or Path.cwd())
     if require_key and not Handler.config.provider.api_key:
         raise MissingApiKey(
             "未提供 API 密钥。请设置环境变量 JANCODE_API_KEY 后重试。")

@@ -107,6 +107,12 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         return _fail(str(exc), alert=not args.selftest)
 
+    # 桌面版才有这一步：双击启动没有命令行参数，环境变量也往往没有，
+    # 界面里保存过的那份设置就是唯一的来源。
+    from .server import apply_saved_settings
+
+    config = apply_saved_settings(config)
+
     port = args.port or free_port()
     # require_key=False：没配密钥也要把界面开起来。
     # 以前这里是直接退出——用户双击得到一个弹窗就没了，而填密钥的地方
