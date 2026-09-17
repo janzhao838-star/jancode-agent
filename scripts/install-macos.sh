@@ -7,10 +7,24 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/dist/JanCode 智能体.app"
 [ -d "$APP" ] || { echo "先运行 scripts/build-desktop.sh 打包"; exit 1; }
 
-codesign --force --deep --sign - "$APP"
+# 先清扩展属性，否则签名会报 resource fork not allowed 而失败。
+# 不用 --deep：bundle 里没有 CodeResources，--deep 生成的资源封印
+# 会让 codesign -v 报 "code has no resources but signature indicates
+# they must be present"，那份包双击照样打不开。
+sign_bundle() {
+  local APP="$1"
+  xattr -cr "$APP" 2>/dev/null || true
+  find "$APP/Contents/MacOS" -type f -perm +111 2>/dev/null | while read -r f; do
+    codesign --force --sign - "$f" >/dev/null 2>&1 || true
+  done
+  [ -d "$APP/Contents/Frameworks" ] && codesign --force --sign - "$APP/Contents/Frameworks" >/dev/null 2>&1 || true
+  codesign --force --sign - "$APP" >/dev/null 2>&1 || true
+}
+
+sign_bundle "$APP"
 rm -rf "/Applications/JanCode 智能体.app"
 cp -R "$APP" "/Applications/"
-codesign --force --deep --sign - "/Applications/JanCode 智能体.app"
+sign_bundle "/Applications/JanCode 智能体.app"
 xattr -dr com.apple.quarantine "/Applications/JanCode 智能体.app" 2>/dev/null || true
 
 ln -sfn "$APP" "$HOME/Desktop/JanCode 智能体.app" 2>/dev/null || true
