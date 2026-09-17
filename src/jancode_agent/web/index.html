@@ -568,6 +568,9 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
     if (!prompt) return;
     var turn = { prompt: prompt, answer: "", tools: [], error: "", status: "", ts: Date.now() };
     pushTurn(turn);
+    // 新的一次运行：服务端会新建 Agent，运行内基线必须清零，
+    // 否则第二轮的增量算不出来（两轮的 turns 可能都是 1）。
+    if (typeof __usageLast !== "undefined") __usageLast = null;
     cur.title = cur.title; renderSide(); renderMain();
     live = { turn: turn, node: null };
     setBusy(true);
@@ -628,7 +631,10 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
     notify(turn);
   }
 
-  var __usageLast = null;  // 上一次 usage 事件（算 tok/s 用）
+  var __usageLast = null;  // 本次运行里上一帧 usage（算 tok/s、算增量用）
+  // 会话累计：服务端每次运行都新建 Agent，单次运行的 usage 只是那一轮的。
+  // 竞品统计栏是会话累计（49 轮 377 步），所以前端自己把每轮的增量加起来。
+  var __session = { turns: 0, steps: 0, prompt: 0, completion: 0, cached: 0 };
   function fmtTok(n) {
     if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
     if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
@@ -644,13 +650,21 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
       var dt = (now - __usageLast.t) / 1000;
       if (dtok > 0 && dt > 0.2) rate = Math.round(dtok / dt) + " tok/s";
     }
-    __usageLast = { completion: u.completion_tokens || 0, t: now };
-    var left = (u.turns || 0) + " 轮 " + (u.steps || 0) + " 步";
+    var base = __usageLast || { turns: 0, steps: 0, prompt: 0, completion: 0, cached: 0 };
+    __session.turns += Math.max(0, (u.turns || 0) - (base.turns || 0));
+    __session.steps += Math.max(0, (u.steps || 0) - (base.steps || 0));
+    __session.prompt += Math.max(0, (u.prompt_tokens || 0) - (base.prompt || 0));
+    __session.completion += Math.max(0, (u.completion_tokens || 0) - (base.completion || 0));
+    __session.cached += Math.max(0, (u.cached_tokens || 0) - (base.cached || 0));
+    __usageLast = { turns: u.turns || 0, steps: u.steps || 0, prompt: u.prompt_tokens || 0,
+                    completion: u.completion_tokens || 0, cached: u.cached_tokens || 0, t: now };
+    var s = __session;
+    var left = s.turns + " 轮 " + s.steps + " 步";
     if (rate) left += " · " + rate;
-    var total = (u.prompt_tokens || 0) + (u.completion_tokens || 0);
+    var total = s.prompt + s.completion;
     var right = total > 0 ? fmtTok(total) + " tok" : "";
-    if ((u.prompt_tokens || 0) > 0) {
-      var hit = Math.round((u.cached_tokens || 0) / u.prompt_tokens * 100);
+    if (s.prompt > 0) {
+      var hit = Math.round(s.cached / s.prompt * 100);
       right += " · 缓存命中 " + hit + "%";
     }
     document.getElementById("usageLeft").textContent = left;
