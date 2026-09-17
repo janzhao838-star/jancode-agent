@@ -363,3 +363,21 @@ class Manager:
 
 
 manager = Manager()
+
+
+def _atexit_close() -> None:
+    """进程退出时收掉还活着的 MCP 子进程。
+
+    MCP 服务是 npx/node 这类常驻进程：主进程里跑它的是 daemon 线程，
+    退出时线程被硬杀，但子进程是独立的——不收的话每次开关一次桌面
+    应用就漏一个 node 进程挂在系统里，越积越多。
+    """
+    try:
+        manager.close_all()
+    except Exception:
+        pass  # 退出路径上任何异常都不能挡住进程结束
+
+
+import atexit
+
+atexit.register(_atexit_close)
