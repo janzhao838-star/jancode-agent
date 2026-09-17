@@ -2156,6 +2156,37 @@ main,.main,#main{overflow:hidden}
   };
 })();
 </script>
+
+<script>
+/* 工作模式选择：默认执行 / 计划模式 / 只读模式。
+   靠 #mg-effort 定位（它由前一个脚本创建），不依赖原来的类名。 */
+(function(){
+  var MODES=[['','默认执行'],['plan','计划模式'],['readonly','只读模式']];
+  function inject(){
+    var eff=document.getElementById('mg-effort');
+    if(!eff||document.getElementById('mg-mode'))return;
+    var md=document.createElement('select');
+    md.id='mg-mode';md.title='工作模式：计划模式下先出方案，只读模式下不许改文件';
+    md.style.cssText='height:32px;border:1px solid #ececf1;border-radius:8px;padding:0 8px;font-size:12.5px;background:#fff;color:#4b5563;margin-left:8px;cursor:pointer';
+    MODES.forEach(function(x){var o=document.createElement('option');o.value=x[0];o.textContent=x[1];md.appendChild(o);});
+    eff.parentNode.insertBefore(md,eff.nextSibling);
+  }
+  var orig=window.fetch;
+  window.fetch=function(url,opts){
+    try{
+      if(String(url).indexOf('/api/run')>=0&&opts&&typeof opts.body==='string'){
+        var md=document.getElementById('mg-mode');
+        if(md&&md.value){
+          var b=JSON.parse(opts.body);b.mode=md.value;
+          opts=Object.assign({},opts,{body:JSON.stringify(b)});
+        }
+      }
+    }catch(e){}
+    return orig.call(this,url,opts);
+  };
+  setInterval(function(){try{inject();}catch(e){}},700);
+})();
+</script>
 </body>
 </html>
 

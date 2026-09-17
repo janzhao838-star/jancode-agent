@@ -734,6 +734,7 @@ class Handler(BaseHTTPRequestHandler):
 
         model = str(payload.get("model") or "").strip()
         effort = str(payload.get("effort") or "")[:16]
+        mode = str(payload.get("mode") or "")[:16]
         config = self.config
 
         wanted = str(payload.get("agent") or "").strip()
@@ -753,6 +754,23 @@ class Handler(BaseHTTPRequestHandler):
             config = replace(config, provider=replace(config.provider, model=model))
         if effort:
             config = replace(config, provider=replace(config.provider, effort=effort))
+
+        # 工作模式：计划模式先出方案不动手；只读模式禁止改文件。
+        # 这两条是行为约束，必须进系统提示，不能只靠用户在正文里说一句
+        # （正文里的要求容易被后面的内容带跑）。
+        MODES = {
+            "plan": (
+                "工作模式：计划模式。先给出完整的分步计划（每步做什么、"
+                "改哪些文件、怎么验证），不要执行任何修改。等我确认后再动手。"
+            ),
+            "readonly": (
+                "工作模式：只读。只做阅读、分析和建议，不要创建、修改或删除"
+                "任何文件，也不要执行有副作用的命令。需要改动时把方案写出来让我确认。"
+            ),
+        }
+        if mode in MODES:
+            base_extra = config.system_extra or ""
+            config = replace(config, system_extra=(base_extra + "\n\n" + MODES[mode]).strip())
 
         last_answer = {"text": ""}
 

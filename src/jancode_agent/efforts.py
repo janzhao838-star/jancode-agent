@@ -15,7 +15,9 @@ from __future__ import annotations
 import re
 
 # 各家推理模型支持的三档
+# gpt-5 及以后支持 minimal（极速），普通推理模型没有这一档
 _THREE = ["low", "medium", "high"]
+_FOUR = ["minimal", "low", "medium", "high"]
 # 只支持「开/关思考」的，映射成高/默认
 _ONE = ["high"]
 
@@ -28,7 +30,7 @@ def options_for(model: str) -> list[str]:
 
     # OpenAI 推理系列：gpt-5 及以后的/o1/o3/o4/codex 都支持 low/medium/high
     if re.match(r"^(o1|o3|o4|gpt-[5-9]|codex)", name):
-        return list(_THREE)
+        return list(_FOUR)
 
     # Anthropic 的思考档位
     if name.startswith("claude") and ("thinking" in name or "4-" in name or "5-" in name):
@@ -60,4 +62,5 @@ def options_for(model: str) -> list[str]:
 
 
 def label(level: str) -> str:
-    return {"low": "快速", "medium": "均衡", "high": "深度思考"}.get(level, level)
+    return {"minimal": "极速", "low": "快速", "medium": "均衡",
+            "high": "深度思考"}.get(level, level)
