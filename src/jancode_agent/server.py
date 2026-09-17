@@ -21,6 +21,11 @@ from dataclasses import asdict, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+
+# 正在跑的任务：run_id -> {inbox, stop}。
+# 插话和停止是从另外的 HTTP 线程进来的，所以必须加锁。
+LIVE: dict = {}
+LIVE_LOCK = threading.Lock()
 from . import __version__
 from .agent import Agent
 from .config import load_config
@@ -676,6 +681,34 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json({"ok": True})
 
+    def _steer_or_stop(self, is_stop: bool) -> None:
+        """插话 / 停止：把指令投给正在跑的那一轮。
+
+        插话不是排队——Agent 循环会在下一个事件处中断当前生成、
+        带着修正重新作答；这里只负责把话送到。
+        """
+        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            payload = json.loads(self.rfile.read(length) or b'{}')
+        except (ValueError, UnicodeDecodeError):
+            self._json({"ok": False, "error": "请求体不是 JSON"})
+            return
+        run_id = str(payload.get("run_id") or "")
+        with LIVE_LOCK:
+            handle = LIVE.get(run_id)
+        if handle is None:
+            self._json({"ok": False, "gone": True, "error": "这一轮已经结束了"})
+            return
+        if is_stop:
+            handle["stop"].set()
+        else:
+            text = str(payload.get("text") or "").strip()
+            if not text:
+                self._json({"ok": False, "error": "插话内容不能为空"})
+                return
+            handle["inbox"].put(text)
+        self._json({"ok": True})
+
     def do_POST(self) -> None:
         if self.path == "/api/notify":
             self._notify()
@@ -698,6 +731,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/automations":
             self._edit_automation()
             return
+        if self.path in ("/api/steer", "/api/stop"):
+            self._steer_or_stop(self.path == "/api/stop")
+            return
         if self.path != "/api/run":
             self._send(404, b"not found", "text/plain")
             return
@@ -715,6 +751,15 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         history = payload.get("history") or []
+
+        # 这一轮的运行句柄：插话和停止靠它找到正在跑的 Agent。
+        run_id = str(payload.get("run_id") or "")
+        handle = None
+        if run_id:
+            from queue import Queue
+            handle = {"inbox": Queue(), "stop": threading.Event()}
+            with LIVE_LOCK:
+                LIVE[run_id] = handle
 
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
@@ -804,7 +849,11 @@ class Handler(BaseHTTPRequestHandler):
                     if role in ("user", "assistant") and content:
                         agent.messages.append(Message(role=role, content=content))
 
-                async for step in agent.run(prompt):
+                async for step in agent.run(
+                prompt,
+                inbox=handle["inbox"] if handle else None,
+                stop=handle["stop"] if handle else None,
+            ):
                     if step.kind == "answer" and not step.subagent:
                         # 流式下回答是分多块来的：增量要累加，
                         # 非增量的整段回答则直接覆盖。
@@ -831,6 +880,9 @@ class Handler(BaseHTTPRequestHandler):
         if disclaimer and disclaimer not in last_answer["text"]:
             emit({"kind": "answer", "text": disclaimer, "tool": "", "ok": True,
                   "subagent": ""})
+        if run_id:
+            with LIVE_LOCK:
+                LIVE.pop(run_id, None)
         emit({"kind": "done"})
 
 

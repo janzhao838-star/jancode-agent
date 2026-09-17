@@ -523,13 +523,22 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
   var mgQueue = [];
   function run(prompt) {
     if (busy || live) {
-      mgQueue.push(prompt);
-      var b = document.getElementById("mg-queue");
-      if (b) {
-        b.style.display = "block";
-        b.textContent = "已排队 " + mgQueue.length + " 条，这轮结束后自动跑";
-      }
-      if (hint) hint.textContent = "已排队 " + mgQueue.length + " 条";
+      // 插话：立刻送进正在跑的那一轮，不是排队。
+      // Agent 循环收到后会在下一个事件处中断当前生成，带着这条修正重答。
+      var liveId = window.mgLive && window.mgLive.id;
+      var turn = live && live.turn;
+      if (turn) { turn.steers = (turn.steers || []).concat([prompt]); renderMain(); }
+      if (!liveId) { runNow(prompt); return; }
+      if (hint) hint.textContent = "已插话，正在按你的修正重答";
+      fetch("/api/steer", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ run_id: liveId, text: prompt })
+      }).then(function (r) { return r.json(); }).then(function (d) {
+        if (!d.ok) {
+          if (d.gone) { hint.textContent = "上一轮已结束，改成新任务"; runNow(prompt); }
+          else { hint.textContent = d.error || "插话失败"; }
+        }
+      }).catch(function (e) { hint.textContent = "插话失败：" + e.message; });
       return;
     }
     return runNow(prompt);
@@ -562,12 +571,14 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
     // 这边一 abort，那边下一次写就抛异常，Agent 循环自然停。
     var ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
     if (window.mgRun) window.mgRun.add(ctrl);
+    var runId = "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    window.mgLive = { id: runId, ctrl: ctrl };
     try {
       var res = await fetch("/api/run", {
         method: "POST",
         signal: ctrl ? ctrl.signal : undefined,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: prompt, history: history(), model: store.model || "", agent: store.agent || "" })
+        body: JSON.stringify({ prompt: prompt, history: history(), model: store.model || "", agent: store.agent || "", run_id: runId })
       });
       if (!res.ok) {
         var msg = "服务返回 " + res.status;
@@ -600,6 +611,7 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
       }
     }
     if (window.mgRun) window.mgRun.done(ctrl);
+    window.mgLive = null;
     turn.secs = ((Date.now() - started) / 1000).toFixed(1);
     live = null;
     setBusy(false);
@@ -2175,6 +2187,14 @@ main,.main,#main{overflow:hidden}
     if(!stop){
       stop=el('button',null,'停止这一轮');stop.id='mg-stop';
       stop.onclick=function(){
+        // 本地断开只让界面立刻停；还要告诉服务端别再往下算，
+        // 否则那一轮会继续烧模型配额。
+        var stopId = window.mgLive && window.mgLive.id;
+        if (stopId) {
+          fetch("/api/stop", { method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ run_id: stopId }) }).catch(function(){});
+        }
         controllers.forEach(function(c){try{c.abort();}catch(e){}});
         controllers=[];active=0;
         stop.style.display='none';
