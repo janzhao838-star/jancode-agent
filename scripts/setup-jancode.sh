@@ -56,7 +56,12 @@ esac
 
 # 密钥：参数 > 环境变量
 [ -n "$KEY" ] || KEY="${JANCODE_API_KEY-}"
-[ -n "$KEY" ] || die "缺少 --key。请在站点的「令牌」页面创建后粘贴到这里"
+if [ -z "$KEY" ]; then
+  if [ "$LIST" = "1" ]; then
+    die "--list 查询模型列表也要鉴权：请补 --key，或先 export JANCODE_API_KEY"
+  fi
+  die "缺少 --key。请在站点的「令牌」页面创建后粘贴到这里"
+fi
 
 command -v curl >/dev/null 2>&1 || die "需要 curl，请先安装"
 command -v python3 >/dev/null 2>&1 || die "需要 python3（3.11 以上），请先安装"

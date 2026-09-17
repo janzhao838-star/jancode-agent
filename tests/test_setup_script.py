@@ -142,6 +142,14 @@ def test_existing_config_backed_up(relay, sandbox):
     assert "user-custom" in backups[0].read_text()
 
 
+def test_list_without_key_gets_specific_hint(relay, sandbox):
+    """--list 无密钥时提示要说清楚：列表查询同样需要鉴权。"""
+    _, env = sandbox
+    r = run_script(env, "--list", "--url", relay + "/v1")
+    assert r.returncode == 1
+    assert "--list" in (r.stdout + r.stderr) and "--key" in (r.stdout + r.stderr)
+
+
 def test_missing_key_aborts(relay, sandbox):
     _, env = sandbox
     r = run_script(env, "--url", relay + "/v1")
