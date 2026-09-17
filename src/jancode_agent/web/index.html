@@ -168,7 +168,7 @@ main,.main,#main{background:var(--soft)!important}
 [data-view].active,[data-view][aria-selected="true"]{background:#f2f0ff!important;color:#5b3ee8!important;font-weight:600}
 [data-view].active:before,[data-view][aria-selected="true"]:before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;background:linear-gradient(180deg,var(--b1),var(--b2))}
 /* 卡片网格 */
-#skillsBody,#agentsBody,#toolsBody{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(420px,1fr))!important;gap:16px!important;align-content:start}
+#skillsBody{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(420px,1fr))!important;gap:16px!important;align-content:start}
 .mg-card{background:#f8f8f9!important;border:1px solid transparent!important;border-radius:14px!important;padding:20px!important;display:flex!important;gap:16px!important;align-items:flex-start!important;box-shadow:none!important}
 .mg-card:hover{background:#f4f4f6!important;transform:none!important}
 .mg-main{flex:1;min-width:0}
@@ -907,12 +907,7 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
     }
   }
   function addTileRow(){
-    var main=document.querySelector('main')||document.body;
-    document.querySelectorAll('[data-view]').forEach(function(el){
-      if(el.querySelector('.mg-ico'))return;
-      var svg='<svg class="mg-ico" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 2.5h11v8h-6l-3 3v-3h-2z"/></svg>';
-      el.insertAdjacentHTML('afterbegin',svg);
-    });
+    // 侧栏图标不做：原有条目本来就有自己的符号，再插一个会变成一行两个图标。
   }
   function buildBar(){
     var view=document.getElementById('view-skills');
@@ -1028,9 +1023,10 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
   });
   function tick(){
     try{
+      // 只渲染技能页。智能体页和工具页交回给原有逻辑：
+      // 装饰脚本靠「抽取文字」重建卡片，遇到表单和输入框会抽出空卡片——
+      // 与其把好页面弄坏，不如不碰。
       addTileRow();buildBar();renderSkills();
-      decorateCards(document.getElementById('agentsBody'));
-      decorateCards(document.getElementById('toolsBody'));
     }catch(e){}
   }
   tick();
