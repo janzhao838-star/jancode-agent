@@ -230,9 +230,11 @@ class Handler(BaseHTTPRequestHandler):
             from dataclasses import asdict
 
             from .library import builtin_agents, list_agents
+            from .presets import BUILTIN_PRESETS
 
             self._json({"ok": True, "agents": [asdict(a) for a in list_agents()],
-                        "builtins": builtin_agents()})
+                        "builtins": builtin_agents(),
+                        "presets": BUILTIN_PRESETS})
             return
         if self.path == "/api/automations":
             from dataclasses import asdict
@@ -306,6 +308,27 @@ class Handler(BaseHTTPRequestHandler):
         from .library import delete_agent, upsert_agent
 
         payload = self._body()
+        # 模式预设：use=切换当前会话的执行模式；install=复制一份到我的智能体。
+        # 预设本体随代码分发改不到，要改就复制，这是它和「数字专家」最大的不同。
+        if payload.get("use_preset"):
+            from .presets import find_preset
+
+            preset = find_preset(str(payload["use_preset"]))
+            if preset is None:
+                self._json({"ok": False, "error": "没有这个预设"})
+                return
+            self._install_preset_mode(preset)
+            return
+        if payload.get("install_preset"):
+            from .presets import find_preset
+
+            preset = find_preset(str(payload["install_preset"]))
+            if preset is None:
+                self._json({"ok": False, "error": "没有这个预设"})
+                return
+            upsert_agent(preset["name"], preset["system_prompt"], "", [])
+            self._json({"ok": True, "copied": preset["name"]})
+            return
         if payload.get("install"):
             self._install_builtin_agent(str(payload["install"]), False)
             return
@@ -326,6 +349,26 @@ class Handler(BaseHTTPRequestHandler):
                      str(payload.get("model") or ""),
                      [str(s) for s in picked] if isinstance(picked, list) else [])
         self._json({"ok": True})
+
+    def _install_preset_mode(self, preset: dict) -> None:
+        # 把选中的模式预设落成持久设置并立即生效：模式存进
+        # desktop-settings.json 的 active_mode，/api/run 每次读它作兜底。
+        saved = _saved_settings()
+        saved["active_mode"] = preset["mode"]
+        prompt = preset.get("system_prompt")
+        if prompt:
+            saved["preset_prompt"] = prompt
+        else:
+            saved.pop("preset_prompt", None)
+        try:
+            SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+            SETTINGS_PATH.write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
+            os.chmod(SETTINGS_PATH, 0o600)
+        except OSError as exc:
+            self._json({"ok": False, "error": f"保存失败：{exc}"})
+            return
+        self._json({"ok": True, "mode": preset["mode"], "name": preset["name"]})
+
 
     def _sync_active_provider(self) -> None:
         """把界面里那次保存同步进当前选中的那套接入配置。
@@ -780,7 +823,16 @@ class Handler(BaseHTTPRequestHandler):
         model = str(payload.get("model") or "").strip()
         effort = str(payload.get("effort") or "")[:16]
         mode = str(payload.get("mode") or "")[:16]
+        # 没显式指定模式时用预设选的 active_mode 兜底（数字专家页「以此为准」
+        # 写进 desktop-settings.json 的），再兜不住就 auto。
+        if not mode:
+            mode = str(_saved_settings().get("active_mode") or "")[:16]
         config = self.config
+        # 预设附带的提示词（极简/创造等模式的人设）拼在技能段前面：
+        # 没选角色时 system_extra 会装技能，预设提示词排在最前，不覆盖技能。
+        preset_prompt = str(_saved_settings().get("preset_prompt") or "").strip()
+        if preset_prompt and mode not in ("", "auto"):
+            config = replace(config, system_extra=preset_prompt)
 
         wanted = str(payload.get("agent") or "").strip()
         persona = find_agent(wanted) if wanted else None
