@@ -918,7 +918,8 @@ class Handler(BaseHTTPRequestHandler):
                     emit({"kind": step.kind, "text": step.text,
                           "tool": step.tool_name, "ok": step.tool_ok,
                           "subagent": step.subagent,
-                          "delta": getattr(step, "delta", False)})
+                          "delta": getattr(step, "delta", False),
+                          "usage": getattr(step, "usage", None) or None})
 
         try:
             asyncio.run(drive())

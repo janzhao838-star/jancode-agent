@@ -91,7 +91,9 @@
   .chipbtn:hover{border-color:hsl(var(--accent))}
   .chipbtn span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .chipbtn .ar{color:hsl(var(--dim));font-size:10px;flex:none}
-  .mpick{display:none;margin-top:8px;background:hsl(var(--panel2));border:1px solid hsl(var(--line));
+  .usage-bar{display:flex;align-items:center;gap:8px;margin-top:6px;padding:0 4px;
+    font-size:11.5px;color:hsl(var(--dim));user-select:none}
+  .usage-bar .usage-sp{flex:1}  .mpick{display:none;margin-top:8px;background:hsl(var(--panel2));border:1px solid hsl(var(--line));
          border-radius:9px;max-height:280px;overflow:auto}
   .mpick.on{display:block}
   .mpick .mi{padding:7px 10px;cursor:pointer;font-size:12.5px;display:flex;gap:8px;align-items:center}
@@ -254,6 +256,11 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
         <button class="primary" id="send">发送</button>
       </div>
       <div class="mpick" id="mpick"></div>
+      <div class="usage-bar" id="usageBar" style="display:none">
+        <span id="usageLeft"></span>
+        <span class="usage-sp"></span>
+        <span id="usageRight"></span>
+      </div>
     </div>
   </div>
   </div>
@@ -621,6 +628,35 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
     notify(turn);
   }
 
+  var __usageLast = null;  // 上一次 usage 事件（算 tok/s 用）
+  function fmtTok(n) {
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
+    return String(n);
+  }
+  function updateUsageBar(u) {
+    var bar = document.getElementById("usageBar");
+    if (!bar) return;
+    var now = Date.now();
+    var rate = "";
+    if (__usageLast && now > __usageLast.t) {
+      var dtok = (u.completion_tokens || 0) - (__usageLast.completion || 0);
+      var dt = (now - __usageLast.t) / 1000;
+      if (dtok > 0 && dt > 0.2) rate = Math.round(dtok / dt) + " tok/s";
+    }
+    __usageLast = { completion: u.completion_tokens || 0, t: now };
+    var left = (u.turns || 0) + " 轮 " + (u.steps || 0) + " 步";
+    if (rate) left += " · " + rate;
+    var total = (u.prompt_tokens || 0) + (u.completion_tokens || 0);
+    var right = total > 0 ? fmtTok(total) + " tok" : "";
+    if ((u.prompt_tokens || 0) > 0) {
+      var hit = Math.round((u.cached_tokens || 0) / u.prompt_tokens * 100);
+      right += " · 缓存命中 " + hit + "%";
+    }
+    document.getElementById("usageLeft").textContent = left;
+    document.getElementById("usageRight").textContent = right;
+    bar.style.display = "flex";
+  }
   function handle(ev, turn) {
     if (ev.kind === "tool") {
       var last = turn.tools.length ? turn.tools[turn.tools.length - 1] : null;
@@ -648,6 +684,9 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
       // 用户插话：当前生成已被中断，模型带着修正重新作答。
       // 记一笔，界面上标出来，让用户知道自己的话真的生效了。
       turn.steers = (turn.steers || []).concat([ev.text]);
+    } else if (ev.kind === "usage") {
+      // 网关报的 token 用量：累计到会话级，输入框下方的统计行就吃它。
+      if (ev.usage) updateUsageBar(ev.usage);
     } else if (ev.kind === "error") {
       turn.error = (ev.subagent ? "[" + ev.subagent + "] " : "") + ev.text;
     } else if (ev.kind === "done") {

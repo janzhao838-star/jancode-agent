@@ -82,6 +82,8 @@ class Step:
     tool_ok: bool = True
     # 非空表示这一步来自子智能体，值是子智能体的标签（界面据此缩进/标注）。
     subagent: str = ""
+    # 本步携带的 token 用量快照（只有 kind="usage" 的步会带）。
+    usage: dict = field(default_factory=dict)
     # True 表示这只是一个文字片段，界面要追加而不是替换。
     # 流式输出的关键：整段回答会拆成很多个 delta 事件发出去。
     delta: bool = False
@@ -146,10 +148,24 @@ class Agent:
         # 没有人在等时（比如测试里直接跑子智能体）就是 None。
         self._sub_step_sink: Callable[[Step], None] | None = None
         self.messages: list[Message] = [Message(role="system", content=self.system_prompt())]
+        # 本会话累计的 token 用量：界面输入框下方的统计行就吃它。
+        # turns=模型请求次数，steps=工具执行次数；缓存命中来自
+        # prompt_tokens_details.cached_tokens（网关支持才有）。
+        self.usage_totals: dict[str, int] = {
+            "turns": 0, "steps": 0,
+            "prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0,
+        }
 
     # ---------- 配置派生 ----------
 
     # ---------- 上下文归档 ----------
+
+    def _merge_usage(self, usage: dict) -> None:
+        """把一次请求的 usage 并进累计器。字段缺失按 0 处理。"""
+        self.usage_totals["prompt_tokens"] += int(usage.get("prompt_tokens") or 0)
+        self.usage_totals["completion_tokens"] += int(usage.get("completion_tokens") or 0)
+        details = usage.get("prompt_tokens_details") or {}
+        self.usage_totals["cached_tokens"] += int(details.get("cached_tokens") or 0)
 
     def _context_chars(self) -> int:
         """整段上下文的粗略字符数（含工具参数）。"""
@@ -350,6 +366,7 @@ class Agent:
             # 退回下面的一次性请求。
             reply: Reply | None = None
             streamed = ""
+            stream_usage: dict = {}
             stopped = interrupted = False
             try:
                 async for event in self._client.stream_reply(self.messages, specs):
@@ -371,6 +388,8 @@ class Agent:
                         piece = event["text"]
                         streamed += piece
                         yield Step("answer", text=piece, delta=True)
+                    elif event.get("type") == "usage":
+                        stream_usage = event.get("usage") or {}
                     elif event.get("type") == "full":
                         # 网关不认 stream，直接把完整回复给过来了：用它，
                         # 不再多发一次请求。
@@ -416,6 +435,13 @@ class Agent:
                 except ProviderError as exc:
                     yield Step("error", tool_ok=False, text=str(exc))
                     return
+            # 一轮回复真正被消费：计一轮，并把网关报的 usage 并进累计器。
+            # 一次性请求的 usage 在 reply 里；流式的在末尾 usage 事件里。
+            self.usage_totals["turns"] += 1
+            usage_chunk = dict(getattr(reply, "usage", None) or stream_usage)
+            if usage_chunk:
+                self._merge_usage(usage_chunk)
+            yield Step("usage", usage=dict(self.usage_totals))
 
             if not reply.wants_tools:
                 text = (reply.content or "").strip() or "（模型没有返回内容）"
@@ -469,6 +495,7 @@ class Agent:
                     ))
                     continue
 
+                self.usage_totals["steps"] += 1
                 # 工具结果由「结束」那一步带回来（见 Step.result 的说明）
                 result: ToolResult | None = None
                 async for step in self._drive_tool(tc):

@@ -208,6 +208,7 @@ class Client:
                 if "reasoning" in body_head or "effort" in body_head:
                     payload = {k: v for k, v in payload.items() if k != "reasoning_effort"}
                     payload.pop("reasoning", None)
+                    payload.pop("stream_options", None)
                     resp = await self._http.post(url, headers=self._headers(), json=payload)
         except httpx.HTTPError as exc:
             raise ProviderError(f"连接 {url} 失败：{exc}") from exc
@@ -281,6 +282,9 @@ class Client:
         url = f"{base}/chat/completions"
         payload = self._chat_payload(messages, tools)
         payload["stream"] = True
+        # 网关默认在流式里不回 usage，不显式要就没有——token 统计就断了。
+        # 个别网关不认这个字段会 400，下面的 400 兜底会把它一起剥掉重试。
+        payload["stream_options"] = {"include_usage": True}
 
         pending: dict[int, dict[str, str]] = {}
         raw_lines: list[str] = []
@@ -291,6 +295,9 @@ class Client:
         last_content = 0.0
         # 累积已产出的文本，用来判断「话是不是已经说完了」
         buf = ""
+        # 流式末尾的 usage 块（include_usage 生效时最后一个 chunk 会带）
+        stream_usage: dict[str, int] = {}
+        finished_at = 0.0  # 收到 finish_reason 的时刻（给 usage chunk 留宽限）
 
         request = self._http.build_request(
             "POST", url, headers=self._headers(), json=payload
@@ -380,6 +387,8 @@ class Client:
                     # 半行被切断时不该让整轮失败，跳过这条继续读
                     continue
 
+                if chunk.get("usage"):
+                    stream_usage = dict(chunk["usage"])
                 for choice in chunk.get("choices") or []:
                     delta = choice.get("delta") or {}
                     piece = delta.get("content") or ""
@@ -411,7 +420,20 @@ class Client:
                         finished = True
 
                 if finished:
-                    break
+                    # usage 块通常紧跟在 finish_reason 后面单独一帧。
+                    # 立刻 break 会把它丢掉——token 统计就永远是 0。
+                    # 所以拿到 usage 或 [DONE] 才走，最多再等 3 秒。
+                    if stream_usage:
+                        break
+                    if not finished_at:
+                        finished_at = time.monotonic()
+                    elif time.monotonic() - finished_at > 3.0:
+                        break
+
+            # 请求级 usage：include_usage 生效时末尾 chunk 会带，整轮请求的
+            # 真实 token 消耗。没有就静默跳过（部分网关不支持该字段）。
+            if stream_usage:
+                yield {"type": "usage", "usage": stream_usage}
 
             if pending:
                 produced = True

@@ -49,8 +49,9 @@ def steps_of(agent, prompt):
 def test_无工具调用时直接给答案(tmp_path):
     agent = make_agent(tmp_path, [Reply(content="你好")])
     steps = steps_of(agent, "打招呼")
-    assert [s.kind for s in steps] == ["answer"]
-    assert steps[0].text == "你好"
+    data = [s for s in steps if s.kind != "usage"]  # usage 步另测
+    assert [s.kind for s in data] == ["answer"]
+    assert data[0].text == "你好"
 
 
 def test_工具调用后把结果回灌并继续(tmp_path):
@@ -60,9 +61,10 @@ def test_工具调用后把结果回灌并继续(tmp_path):
         Reply(content="文件里是「内容」"),
     ])
     steps = steps_of(agent, "读文件")
-    assert [s.kind for s in steps] == ["tool", "tool", "answer"]
-    assert steps[0].tool_name == "read_file"
-    assert "内容" in steps[1].text
+    data = [s for s in steps if s.kind != "usage"]
+    assert [s.kind for s in data] == ["tool", "tool", "answer"]
+    assert data[0].tool_name == "read_file"
+    assert "内容" in data[1].text
     # 工具结果必须以 tool 角色进入历史，否则下一轮模型看不到
     roles = [m.role for m in agent.messages]
     assert "tool" in roles
@@ -74,7 +76,8 @@ def test_工具失败不中断且告知模型(tmp_path):
         Reply(content="文件不存在"),
     ])
     steps = steps_of(agent, "读一个不存在的文件")
-    assert steps[1].tool_ok is False
+    data = [s for s in steps if s.kind != "usage"]
+    assert data[1].tool_ok is False
     # 仍然走到了最终答复
     assert steps[-1].kind == "answer"
 

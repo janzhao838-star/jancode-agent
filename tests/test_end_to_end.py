@@ -58,8 +58,9 @@ def test_工具调用闭环走真实_HTTP(tmp_path):
                 return [s async for s in agent.run("读一下 note.txt")]
         steps = asyncio.run(_go())
 
-        assert steps[0].kind == "tool" and steps[0].tool_name == "read_file"
-        assert "秘密内容" in steps[1].text          # 工具真的读到了
+        data = [s for s in steps if s.kind != "usage"]
+        assert data[0].kind == "tool" and data[0].tool_name == "read_file"
+        assert "秘密内容" in data[1].text          # 工具真的读到了
         assert steps[-1].kind == "answer"
         assert "秘密内容" in steps[-1].text
     finally:

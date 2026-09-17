@@ -100,7 +100,7 @@ def test_子智能体的每一步都带标签冒泡(tmp_path):
     assert any(s.tool_name == "read_file" for s in sub_steps), "子智能体的工具调用也要冒泡"
     assert any(s.kind == "answer" for s in sub_steps)
     # 主智能体自己的步骤不带标签，否则界面无法区分
-    top = [s for s in steps if not s.subagent]
+    top = [s for s in steps if not s.subagent and s.kind != "usage"]
     assert top[0].tool_name == "task" and top[-1].kind == "answer"
 
 
