@@ -44,10 +44,17 @@ $vpy = ".venv-win\Scripts\python.exe"
 if (-not (Test-Path $vpy)) { Fail "虚拟环境没建起来" }
 
 Step 3 "安装依赖"
-& $vpy -m pip install --upgrade pip -q
-& $vpy -m pip install -e . -q
-& $vpy -m pip install pywebview pyinstaller -q
-if ($LASTEXITCODE -ne 0) { Fail "依赖安装失败（看上面的报错，多半是网络）" }
+# 每条都要单独检查退出码：之前三条连在一起只看了最后一条，
+# 前面的失败会被放过，结果拖到跑测试时才报「找不到 pytest」。
+& $vpy -m pip install --upgrade pip
+if ($LASTEXITCODE -ne 0) { Fail "升级 pip 失败（多半是网络）" }
+
+& $vpy -m pip install -e .
+if ($LASTEXITCODE -ne 0) { Fail "安装项目本体失败。若是网络问题，可试：& $vpy -m pip install -e . -i https://pypi.tuna.tsinghua.edu.cn/simple" }
+
+# pytest 是开发依赖，不在项目依赖里，必须单独装
+& $vpy -m pip install pywebview pyinstaller pytest
+if ($LASTEXITCODE -ne 0) { Fail "安装依赖失败。若是网络问题，可试：& $vpy -m pip install pywebview pyinstaller pytest -i https://pypi.tuna.tsinghua.edu.cn/simple" }
 
 Step 4 "跑测试"
 & $vpy -m pytest -q
