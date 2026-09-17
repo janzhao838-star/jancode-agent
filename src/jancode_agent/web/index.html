@@ -2366,7 +2366,12 @@ main,.main,#main{overflow:hidden}
     b.onclick=function(){ sendMsg(ta.value); ta.value=''; };
     ta.onkeydown=function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); b.onclick(); } };
     wrap.appendChild(ta); wrap.appendChild(b);
-    send.parentNode.insertBefore(wrap, send.nextSibling);
+    // 必须插在输入框上方、占满整行。
+    // 上一版插在 #send 后面（底部那一行的右边），被挤得看不见，所以
+    // 用户压根找不到这个框——功能是对的，位置错了等于没有。
+    var inp = document.getElementById('input');
+    if (inp && inp.parentNode) inp.parentNode.insertBefore(wrap, inp);
+    else send.parentNode.insertBefore(wrap, send);
   }
   setInterval(function(){ try{ install(); }catch(e){} }, 900);
 })();
