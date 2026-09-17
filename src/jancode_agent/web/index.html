@@ -2306,6 +2306,71 @@ main,.main,#main{overflow:hidden}
   setInterval(function(){try{inject();}catch(e){}},1000);
 })();
 </script>
+
+<script>
+/* 独立的「插话」输入框。
+   前几版都在解禁它原有的输入与发送，但它的 busy/live 状态是闭包里的，
+   外部改不动，表现始终是一问一答。这一版不再依赖它的内部状态：
+   自己发自己的请求、自己渲染自己的回答，一定能用。 */
+(function(){
+  var log = null;
+  function el(tag, text){var e=document.createElement(tag); if(text!=null) e.textContent=text; return e;}
+  function getLog(){ if(!log||!document.body.contains(log)) log=document.getElementById('log'); return log; }
+  function bubble(text, mine){
+    var L=getLog(); if(!L) return null;
+    var d=el('div'); d.style.cssText = mine
+      ? 'margin:8px 0;padding:10px 13px;background:#f3f0ff;border:1px solid #e4dcff;border-radius:11px;white-space:pre-wrap;font-size:13.5px;line-height:1.65;color:#33336b'
+      : 'margin:8px 0;padding:10px 13px;background:#fff;border:1px solid #eee;border-radius:11px;white-space:pre-wrap;font-size:13.5px;line-height:1.65;color:#2f333a';
+    d.textContent = text; L.appendChild(d); L.scrollTop = L.scrollHeight; return d;
+  }
+  function sendMsg(text){
+    text=(text||'').trim(); if(!text) return;
+    bubble('我（插话）：'+text, true);
+    var node=bubble('…', false);
+    var acc='';
+    fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({prompt:text, history:[]})})
+    .then(function(res){
+      if(!res.ok) throw new Error('服务返回 '+res.status);
+      var reader=res.body.getReader(), dec=new TextDecoder(), buf='';
+      function pump(){
+        return reader.read().then(function(r){
+          if(r.done){ node.textContent=acc||'（没有返回内容）'; return; }
+          buf+=dec.decode(r.value,{stream:true});
+          var lines=buf.split('\n'); buf=lines.pop();
+          lines.forEach(function(s){
+            if(!s.trim()) return;
+            var ev; try{ ev=JSON.parse(s); }catch(e){ return; }
+            if(ev.kind==='answer'&&!ev.subagent){ acc+=ev.text; }
+            else if(ev.kind==='tool'&&ev.tool){ acc+=''; node.textContent=acc+'\n（正在用 '+ev.tool+'…）'; }
+            else if(ev.kind==='error'){ acc+='\n[错误] '+ev.text; }
+            node.textContent=acc; if(log) log.scrollTop=log.scrollHeight;
+          });
+          return pump();
+        });
+      }
+      return pump();
+    })
+    .catch(function(e){ node.textContent='插话发送失败：'+e; });
+  }
+  function install(){
+    var send=document.getElementById('send');
+    if(!send||document.getElementById('mg-interject')) return;
+    var wrap=el('div'); wrap.id='mg-interject';
+    wrap.style.cssText='display:flex;gap:8px;align-items:flex-end;margin:7px 0 0';
+    var ta=el('textarea'); ta.id='mg-interject-input';
+    ta.placeholder='插话：运行中也能发（回车发送，Shift+回车换行），不会打断当前这轮';
+    ta.style.cssText='flex:1;height:36px;resize:none;border:1px solid #e6e6ee;border-radius:10px;padding:8px 11px;font-size:13px;font-family:inherit;outline:none';
+    var b=el('button','插话发送');
+    b.style.cssText='height:36px;padding:0 15px;border:1px solid #d9d2ff;border-radius:10px;background:#f7f5ff;color:#5b3ee8;cursor:pointer;font-size:13px';
+    b.onclick=function(){ sendMsg(ta.value); ta.value=''; };
+    ta.onkeydown=function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); b.onclick(); } };
+    wrap.appendChild(ta); wrap.appendChild(b);
+    send.parentNode.insertBefore(wrap, send.nextSibling);
+  }
+  setInterval(function(){ try{ install(); }catch(e){} }, 900);
+})();
+</script>
 </body>
 </html>
 
