@@ -12,9 +12,7 @@ import httpx
 
 from jancode_agent.agent import Agent
 from jancode_agent.config import AgentConfig, ProviderConfig
-from jancode_agent.providers import Client, Reply
-
-from jancode_agent.providers import ToolCall
+from jancode_agent.providers import Client, ProviderError, Reply, ToolCall
 from tests.mock_server import chat_reply, start
 
 SSE_HEAD = {"Content-Type": "text/event-stream"}
@@ -229,3 +227,29 @@ def test_cli无usage时安静收场(tmp_path, capsys):
     code = asyncio.run(go())
     out = capsys.readouterr().out
     assert code == 0 and "——" not in out, out
+
+
+def test_full兜底时usage走reply路径():
+    """网关无视 stream 直接回完整 JSON：usage 在 Reply 里，不再吐 usage 事件。"""
+    blob = json.dumps({"choices": [{"message": {"role": "assistant", "content": "整段"},
+        "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}})
+    sse = blob + "\n\n"
+    events = collect_events(make_client(sse))
+    kinds = [e["type"] for e in events]
+    assert "full" in kinds, kinds
+    # full 事件里 usage 已解析进 Reply
+    reply = [e for e in events if e["type"] == "full"][0]["reply"]
+    assert reply.usage["prompt_tokens"] == 11 and reply.usage["completion_tokens"] == 7
+    # 不该再有独立的 usage 事件（避免双重计费）
+    assert "usage" not in kinds, f"full 路径不该再吐 usage 事件：{kinds}"
+
+
+def test_stream空响应报错且agent能退回一次性(tmp_path):
+    """网关连接成功但什么都不回：ProviderError 要抛出，主循环据此退回 complete()。"""
+    sse = ""
+    try:
+        collect_events(make_client(sse))
+        raise AssertionError("应当抛 ProviderError")
+    except ProviderError as exc:
+        assert "没有任何内容" in str(exc)
