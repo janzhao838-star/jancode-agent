@@ -184,6 +184,11 @@ class Handler(BaseHTTPRequestHandler):
                  "has_key": bool(row.get("api_key")),
                  "is_active": row["name"] == active} for row in items]})
             return
+        if self.path.startswith("/api/mcp"):
+            from .mcp import manager
+
+            self._json({"ok": True, "servers": manager.status()})
+            return
         if self.path == "/api/vendors":
             from .catalog import vendors
 
@@ -328,6 +333,62 @@ class Handler(BaseHTTPRequestHandler):
         if cfg.api_key:
             row["api_key"] = cfg.api_key
         save_providers(items, active)
+
+    def _edit_mcp(self) -> None:
+        """增删 MCP 服务、重连、探活。"""
+        from .mcp import MCPClient, load_servers, manager, save_servers
+
+        payload = self._body()
+        action = str(payload.get("action") or "add").strip()
+        name = str(payload.get("name") or "").strip()
+
+        if action == "reload":
+            manager.reload()
+            self._json({"ok": True, "servers": manager.status()})
+            return
+
+        if action == "remove":
+            rows = [s for s in load_servers() if s["name"] != name]
+            save_servers(rows)
+            manager.reload()
+            self._json({"ok": True})
+            return
+
+        if action == "probe":
+            command = str(payload.get("command") or "").strip()
+            if not command:
+                self._json({"ok": False, "error": "没有启动命令"})
+                return
+            client = MCPClient(name or "probe", command,
+                               [str(a) for a in (payload.get("args") or [])],
+                               payload.get("env") or None)
+            try:
+                client.start()
+                self._json({"ok": True, "tools": [x.get("name") for x in client.tools],
+                            "server": client.server_info.get("name", "")})
+            except Exception as exc:
+                self._json({"ok": False, "error": str(exc)})
+            finally:
+                client.close()
+            return
+
+        command = str(payload.get("command") or "").strip()
+        if not name or not command:
+            self._json({"ok": False, "error": "服务和命令都要填"})
+            return
+        rows = load_servers()
+        row = next((s for s in rows if s["name"] == name), None)
+        if row is None:
+            row = {"name": name, "command": command, "args": [], "env": {}, "enabled": True}
+            rows.append(row)
+        row["command"] = command
+        row["args"] = [str(a) for a in (payload.get("args") or [])]
+        row["enabled"] = bool(payload.get("enabled", True))
+        if payload.get("env"):
+            row["env"] = {str(k): str(v) for k, v in payload["env"].items()}
+        save_servers(rows)
+        manager.reload()
+        self._json({"ok": True, "servers": manager.status()})
 
     def _edit_provider(self) -> None:
         """增删改和切换接入配置。"""
@@ -596,6 +657,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if self.path == "/api/notify":
             self._notify()
+            return
+        if self.path == "/api/mcp":
+            self._edit_mcp()
             return
         if self.path == "/api/providers":
             self._edit_provider()

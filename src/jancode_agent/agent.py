@@ -25,6 +25,7 @@ from typing import AsyncIterator, Callable
 
 from .config import AgentConfig
 from .providers import Client, Message, ProviderError, ToolCall
+from .mcp import manager
 from .tools import ToolResult, Toolbox
 
 SYSTEM_PROMPT = """你是一个终端里的编程助手，可以直接读写文件、执行命令。
@@ -201,7 +202,12 @@ class Agent:
         if tc.name == "task":
             self._sub_step_sink = queue.put_nowait
         try:
-            call = asyncio.ensure_future(self.toolbox.call(tc.name, tc.arguments))
+            # MCP 工具是阻塞式子进程调用，丢到线程里，别卡住事件循环
+            if str(tc.name).startswith("mcp__"):
+                call = asyncio.ensure_future(
+                    asyncio.to_thread(manager.call, tc.name, tc.arguments))
+            else:
+                call = asyncio.ensure_future(self.toolbox.call(tc.name, tc.arguments))
             while True:
                 waiter = asyncio.ensure_future(queue.get())
                 done, _ = await asyncio.wait({call, waiter}, return_when=asyncio.FIRST_COMPLETED)
@@ -236,7 +242,7 @@ class Agent:
             await self._client.__aenter__()
 
         self.messages.append(Message(role="user", content=prompt))
-        specs = self.toolbox.specs()
+        specs = self.toolbox.specs() + manager.specs()
         seen: list[tuple[str, str]] = []  # 重复调用检测
 
         for step_no in range(1, self.config.max_steps + 1):
