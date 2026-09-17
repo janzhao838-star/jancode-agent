@@ -558,9 +558,14 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
     hint.textContent = "执行中…";
 
     var started = Date.now();
+    // 停止按钮要掐的就是这个 controller。服务端 emit() 直接写 socket，
+    // 这边一 abort，那边下一次写就抛异常，Agent 循环自然停。
+    var ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    if (window.mgRun) window.mgRun.add(ctrl);
     try {
       var res = await fetch("/api/run", {
         method: "POST",
+        signal: ctrl ? ctrl.signal : undefined,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: prompt, history: history(), model: store.model || "", agent: store.agent || "" })
       });
@@ -586,13 +591,19 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
       }
       turn.status = turn.error ? "bad" : "ok";
     } catch (e) {
-      turn.status = "bad";
-      turn.error = String(e.message || e);
+      if (e && e.name === "AbortError") {
+        // 用户点了停止：这是正常结果，不是故障
+        turn.status = "stop"; turn.stopped = true;
+      } else {
+        turn.status = "bad";
+        turn.error = String(e.message || e);
+      }
     }
+    if (window.mgRun) window.mgRun.done(ctrl);
     turn.secs = ((Date.now() - started) / 1000).toFixed(1);
     live = null;
     setBusy(false);
-    hint.textContent = "就绪";
+    hint.textContent = turn.stopped ? "已停止" : "就绪";
     mgDrain();
     save(); renderSide(); renderMain();
     notify(turn);
@@ -2139,6 +2150,21 @@ main,.main,#main{overflow:hidden}
    同时给一个「停止」按钮，能把当前这一轮掐掉。 */
 (function(){
   var active=0, controllers=[];
+  // runNow 活在另一个 <script> 里，看不到这里的 controllers，
+  // 所以之前停止按钮绑的是个空数组，点下去什么都不发生。
+  // 开一个全局入口给它注册/注销 AbortController。
+  window.mgRun = {
+    add: function(c){
+      if(!c) return;
+      controllers.push(c); active++;
+      ensure(); if(stop) stop.style.display='block';
+    },
+    done: function(c){
+      var i=controllers.indexOf(c); if(i>=0) controllers.splice(i,1);
+      active=Math.max(0,active-1);
+      if(!active&&stop) stop.style.display='none';
+    }
+  };
   function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
   var stop=null, badge=null;
   function ensure(){
