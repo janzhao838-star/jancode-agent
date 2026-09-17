@@ -156,7 +156,10 @@ def skills_section(skills: list[Skill] | None = None) -> str:
             block += f"{skill.description}\n"
         block += skill.content.strip() + "\n"
         if used + len(block) > MAX_SKILL_CHARS:
-            parts.append("（技能太多，其余未加载。用 list_skills 查看全部。）")
+            # 不能让模型「用 list_skills 查看」——工具列表里没有这个工具，
+            # 模型会照做然后空试一轮。直接说明情况，让用户在界面上管理技能。
+            parts.append("（技能太多，其余未加载。请用户在界面的技能页查看全部，"
+                       "或把要用的技能内容拆短些。）")
             break
         used += len(block)
         parts.append(block)
