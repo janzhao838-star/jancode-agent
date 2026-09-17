@@ -35,11 +35,14 @@ sign_bundle() {
   find "$APP" -exec xattr -c {} \; 2>/dev/null || true
   xattr -dr com.apple.fileprovider.fpfs#P "$APP" 2>/dev/null || true
   xattr -dr com.apple.FinderInfo "$APP" 2>/dev/null || true
-  find "$APP/Contents/MacOS" -type f -perm +111 2>/dev/null | while read -r f; do
-    codesign --force --sign - "$f" >/dev/null 2>&1 || true
-  done
-  [ -d "$APP/Contents/Frameworks" ] && codesign --force --sign - "$APP/Contents/Frameworks" >/dev/null 2>&1 || true
-  codesign --force --sign - "$APP" >/dev/null 2>&1 || true
+  # PyInstaller 拷贝 Python.framework 时剥离了资源但留了旧 _CodeSignature，
+  # 残留封印会让 codesign 报 "code has no resources but signature
+  # indicates they must be present"——删掉旧的让 --deep 重新生成。
+  find "$APP" -name _CodeSignature -type d -exec rm -rf {} + 2>/dev/null || true
+  # 只对 app 根做一次 --deep：对 Frameworks 子组件做非 deep 的补签
+  # 会生成指向「无资源」的封印，--verify --deep 反而报
+  # "code has no resources but signature indicates they must be present"。
+  codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
 }
 
 sign_bundle "$APP"
