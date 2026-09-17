@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import threading
@@ -55,6 +56,16 @@ def save_servers(items: list[dict]) -> None:
         os.chmod(CONFIG_PATH, 0o600)  # 里面可能有服务端密钥
     except OSError:
         pass
+
+
+def slug(text: str) -> str:
+    """把名字洗成工具名允许的字符。
+
+    工具名只允许 [a-zA-Z0-9_-]。服务名是人取的（「Memory 记忆」），
+    直接拼进工具名会带空格或中文，整个请求会被 provider 拒掉——
+    而且报错只说 tools[22].name 不合法，很难看出是名字问题。
+    """
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", str(text or ""))
 
 
 class MCPError(RuntimeError):
@@ -217,7 +228,7 @@ class MCPClient:
             out.append({
                 "type": "function",
                 "function": {
-                    "name": f"{prefix}__{self.name}__{tool.get('name')}",
+                    "name": f"{prefix}__{slug(self.name)}__{slug(tool.get('name'))}",
                     "description": (f"[{self.name}] "
                                     + str(tool.get("description") or "")).strip(),
                     "parameters": schema,
@@ -296,6 +307,9 @@ class Manager:
             return ToolResult(False, f"工具名 {full_name!r} 格式不对")
         _, server, tool = bits
         client = self._clients.get(server)
+        if client is None:
+            # 工具名里的服务名是洗过的，这里按洗过的名字再找一次
+            client = next((c for n, c in self._clients.items() if slug(n) == server), None)
         if client is None:
             return ToolResult(False, f"MCP 服务 {server!r} 未运行：{self._errors.get(server, '未配置')}")
         try:

@@ -612,19 +612,10 @@ class Handler(BaseHTTPRequestHandler):
         # 只问当前地址要 /models 是不够的：有些网关（自建的 DGX 就是）压根不返回
         # 模型清单，用户切过一次中转站，之前配好的模型就在这个下拉框里消失了，
         # 看着像「配置丢了」。所以：当前地址能拉到的 + 配过的 + 内置目录，全并进来。
-        try:
-            from .catalog import CATALOG
-
-            rows, _active = load_providers()
-            for row in rows:
-                if row.get("model"):
-                    ids.append(str(row["model"]))
-            for group in CATALOG:
-                ids.extend(str(m) for m in group.get("models") or [])
-        except Exception:
-            pass
+        # 只保留当前这套接入配置自己的模型：用哪套 API 就显示哪套的。
+        # 当前配置的模型永远排在最前，即使接口不返回清单也能选它。
         if p.model:
-            ids.append(p.model)
+            ids.insert(0, p.model)
         seen = set()
         ids = [x for x in ids if not (x in seen or seen.add(x))]
 
