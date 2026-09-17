@@ -153,7 +153,7 @@ def skills_section(skills: list[Skill] | None = None) -> str:
     return "\n已知技能（用户自己写的做法，遇到同类任务照这个来）：\n\n" + "\n".join(parts)
 
 
-# ---------- 自定义智能体 ----------
+# ---------- 内置预设 ----------
 
 
 def list_agents() -> list[Persona]:
