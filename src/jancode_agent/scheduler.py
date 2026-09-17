@@ -152,13 +152,20 @@ def start(config, interval: float = 30.0) -> threading.Thread:
     async def _default_runner(run_config, prompt: str) -> str:
         from .agent import Agent
 
-        last = ""
+        parts: list[str] = []
         async with Agent(run_config) as agent:
             async for step in agent.run(prompt):
                 if step.kind == "answer" and not step.subagent:
-                    last = step.text
+                    if step.delta:
+                        # 流式回答是一串 delta 分片，收尾还会发一个空的
+                        # answer 标记。覆盖式赋值的话最后只剩空串——
+                        # 任务实际跑成了，记录里却是「（没有结论）」。
+                        parts.append(step.text)
+                    elif step.text:
+                        parts = [step.text]
                 elif step.kind == "error" and not step.subagent:
-                    last = f"失败：{step.text}"
+                    parts = [f"失败：{step.text}"]
+        last = "".join(parts)
         return last or "（没有结论）"
 
     def _runner(run_config, prompt: str) -> str:
