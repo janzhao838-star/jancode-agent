@@ -671,6 +671,12 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
     document.getElementById("usageRight").textContent = right;
     bar.style.display = "flex";
   }
+  function resetUsageSession() {
+    __usageLast = null;
+    __session = { turns: 0, steps: 0, prompt: 0, completion: 0, cached: 0 };
+    var bar = document.getElementById("usageBar");
+    if (bar) bar.style.display = "none";
+  }
   function handle(ev, turn) {
     if (ev.kind === "tool") {
       var last = turn.tools.length ? turn.tools[turn.tools.length - 1] : null;
@@ -927,10 +933,13 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
 
   $("newChat").onclick = function () {
     cur = newSession(); save(); renderSide(); renderMain(); input.focus();
+    // 新对话从零计：统计行是会话级的，不清会让旧对话的 token 记到新对话头上。
+    resetUsageSession();
   };
   $("clearBtn").onclick = function () {
     if (!cur) return;
     cur.turns = []; cur.title = "新对话"; save(); renderSide(); renderMain();
+    resetUsageSession();
   };
   log.addEventListener("click", function (e) {
     var a = e.target.getAttribute && e.target.getAttribute("data-copy");
