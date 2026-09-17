@@ -963,20 +963,25 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             asyncio.run(drive())
+            # 法律声明由这里强制附加：模型忘了、改写了、或者被后续指令盖掉了，
+            # 都不影响用户在最后一定看得到它。这类声明的责任在程序，不在模型。
+            if disclaimer and disclaimer not in last_answer["text"]:
+                emit({"kind": "answer", "text": disclaimer, "tool": "", "ok": True,
+                      "subagent": ""})
         except ProviderError as exc:
             emit({"kind": "error", "text": str(exc)})
         except Exception as exc:  # 兜底：任何异常都要让界面看到，而不是静默断流
             emit({"kind": "error", "text": f"内部错误：{exc}"})
-
-        # 法律声明由这里强制附加：模型忘了、改写了、或者被后续指令盖掉了，
-        # 都不影响用户在最后一定看得到它。这类声明的责任在程序，不在模型。
-        if disclaimer and disclaimer not in last_answer["text"]:
-            emit({"kind": "answer", "text": disclaimer, "tool": "", "ok": True,
-                  "subagent": ""})
-        if run_id:
-            with LIVE_LOCK:
-                LIVE.pop(run_id, None)
-        emit({"kind": "done"})
+        finally:
+            # 客户端中途断连时 emit 会抛 BrokenPipeError，不进 finally 的清理
+            # 会把 run_id 留在 LIVE 里——越积越多，还让 stop 误以为还活着。
+            if run_id:
+                with LIVE_LOCK:
+                    LIVE.pop(run_id, None)
+        try:
+            emit({"kind": "done"})
+        except OSError:
+            pass  # 客户端已断连，done 送不到就算了
 
 
 class MissingApiKey(RuntimeError):
