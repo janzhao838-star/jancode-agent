@@ -285,9 +285,9 @@ class Client:
             "POST", url, headers=self._headers(), json=payload
         )
         resp = await self._http.send(request, stream=True)
-        # 这里刻意不用 async with：退出时会 await resp.aclose()，
-        # 而实测网关会把 SSE 连接多挂好几秒才真正关闭，于是用户在
-        # 文字吐完之后还要盯着转圈。改成自己控制关闭，见下面的 finally。
+        # 这里刻意不用 async with：退出时会无界地 await resp.aclose()。
+        # 实测关闭本身只要 0.01 秒，这么写是防御性的——不能把用户的
+        # 等待时间交给对端决定。改成自己限时关闭，见下面的 finally。
         try:
             if resp.status_code >= 400:
                 raw = await resp.aread()
@@ -308,10 +308,12 @@ class Client:
                 else:
                     # 已经吐过内容了，判断话是不是说完了：
                     # 以句末标点/换行收尾的，静默 2.5 秒就认定说完；
-                    # 看不出收尾也只等 5 秒——实测应用路径下网关在最后
-                    # 一个内容之后要拖约 9 秒才发 finish_reason
-                    # （直连只有 0.13 秒，是整套工具让它变慢的），
-                    # 而文字这时已经全部送到用户眼前了。
+                    # 看不出收尾也只等 5 秒。
+                    # 这是防御性设置：正常情况网关很快发 finish_reason
+                    # （直连实测 0.13 秒），超时基本不触发。防的是那种
+                    # 收了 stream=true 却把连接挂着不发不收的网关。
+                    # 注意：之前误以为「网关拖 9 秒才收尾」，其实那 9 秒
+                    # 是上层多发了一次完整请求，已修，与网关无关。
                     looks_done = buf.rstrip().endswith(
                         ("。", "！", "？", "…", ".", "!", "?", chr(10), chr(34), "”", "`")
                     )
@@ -410,9 +412,8 @@ class Client:
                 raise ProviderError("流式响应里没有任何内容")
 
         finally:
-            # 绝不死等连接关闭：实测网关会把连接挂住十几秒。
-            # 给它 1 秒，关不掉就放着——这个客户端用完就关，
-            # 不值得为一次优雅关闭让用户多等。
+            # 绝不死等连接关闭：给它 1 秒，关不掉就放着。
+            # 这个客户端用完就关，不值得为一次优雅关闭让用户多等。
             try:
                 await asyncio.wait_for(resp.aclose(), timeout=1.0)
             except Exception:
