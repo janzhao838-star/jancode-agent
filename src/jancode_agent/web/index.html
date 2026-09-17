@@ -2220,6 +2220,13 @@ main,.main,#main{overflow:hidden}
       .then(function(r){return r.json();})
       .then(function(j){
         var names=s[3](j)||[];
+        // 服务在跑但一个模型都没有，也要说出来——不然用户以为没扫到服务，
+        // 实际上是服务活着、只是还没下模型，这两种情况的处理办法完全不同。
+        if(!names.length){
+          var e0=el('div','hint',s[0]+' 已在运行（'+s[4]+'），但里面还没有任何模型——'
+            +(s[0]==='Ollama'?'先 ollama pull 一个模型':'先在本地加载一个模型')+'再扫。');
+          e0.style.color='#b45309';out.appendChild(e0);found++;
+        }
         if(names.length){
           found++;
           var box=el('div');box.style.cssText='margin:8px 0;padding:9px 11px;background:#fafaff;border:1px solid #eee;border-radius:9px';
@@ -2239,7 +2246,7 @@ main,.main,#main{overflow:hidden}
       .then(function(){
         left--;
         if(left===0&&found===0)out.innerHTML='<div class="hint">没发现本机推理服务。装了 Ollama / LM Studio 的话先把服务启动起来再扫。</div>';
-        else if(left===0&&found>0)out.querySelectorAll('.hint').forEach(function(h){h.remove();});
+        else if(left===0&&found>0)out.querySelectorAll('.hint').forEach(function(h){if(h.textContent.indexOf('正在扫描')>=0)h.remove();});
       });
     });
   }
