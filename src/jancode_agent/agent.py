@@ -108,6 +108,20 @@ def drain_inbox(inbox) -> str:
             got.append(str(item))
     return "\n".join(got)
 
+# ---------- 上下文自动归档 ----------
+# 长任务里上下文只增不减，最后两条路：撑爆模型的窗口，或被中转站按
+# 超长拒单。工具输出是膨胀的大头（一次 read_file 就是几千字），所以
+# 归档只压工具输出和模型自己的长篇大论，用户的话和系统提示词一律不动。
+# 预算按字符数估算：中文约 1 字 1 token，英文约 4 字符 1 token，
+# 12 万字符落在多数模型 32k 窗口的安全线内。
+ARCHIVE_BUDGET = 120_000
+# 触发归档时，最近这么多条消息保持原样（当前正在用的工具结果在里面）
+ARCHIVE_KEEP_RECENT = 16
+# 单条工具输出超过这个字数才值得压
+ARCHIVE_TOOL_MAX = 600
+# 模型自己的一条回复超过这个字数才压（计划、结论保留头部的价值最大）
+ARCHIVE_ASSISTANT_MAX = 2_000
+
 class Agent:
     """把模型、工具、循环控制拼在一起。"""
 
@@ -134,6 +148,57 @@ class Agent:
         self.messages: list[Message] = [Message(role="system", content=self.system_prompt())]
 
     # ---------- 配置派生 ----------
+
+    # ---------- 上下文归档 ----------
+
+    def _context_chars(self) -> int:
+        """整段上下文的粗略字符数（含工具参数）。"""
+        total = 0
+        for m in self.messages:
+            total += len(m.content)
+            for tc in m.tool_calls:
+                total += len(json.dumps(tc.arguments, ensure_ascii=False))
+        return total
+
+    def _maybe_archive(
+        self,
+        budget: int | None = None,
+        keep_recent: int | None = None,
+    ) -> int:
+        """上下文超预算时，把较早的大条目压成「开头 + 已归档」短桩。
+
+        只动较早区域（最后 keep_recent 条不动）：正在进行的工具结果、
+            模型刚说的话都保持原样。压过的条目天然幂等——桩比阈值短，
+            下一轮不会再动。配对不受影响：tool 消息靠 tool_call_id 回指，
+            跟内容无关。返回归档条数（0 表示这轮没触发）。
+        """
+        budget = ARCHIVE_BUDGET if budget is None else budget
+        keep_recent = ARCHIVE_KEEP_RECENT if keep_recent is None else keep_recent
+        if self._context_chars() <= budget:
+            return 0
+        cut = len(self.messages) - max(keep_recent, 0)
+        if cut <= 0:
+            return 0
+        archived = 0
+        for m in self.messages[:cut]:
+            if m.role == "tool" and len(m.content) > ARCHIVE_TOOL_MAX:
+                head = m.content[:300]
+                omitted = len(m.content)
+                tool_name = m.name or "该工具"
+                m.content = (
+                    f"{head}\n…【已自动归档：原输出约 {omitted} 字，此处只保留开头。"
+                    f"需要完整内容时重新执行 {tool_name}，或用 read_file 看源头文件。】"
+                )
+                archived += 1
+            elif m.role == "assistant" and len(m.content) > ARCHIVE_ASSISTANT_MAX:
+                head = m.content[:600]
+                omitted = len(m.content)
+                m.content = (
+                    f"{head}\n…【已自动归档：这条较早的回复原文约 {omitted} 字，"
+                    f"只保留开头。关键结论如需回顾，请向用户确认或重新查看相关文件。】"
+                )
+                archived += 1
+        return archived
 
     def system_prompt(self) -> str:
         """按当前身份和配置拼系统提示词。"""
@@ -276,6 +341,9 @@ class Agent:
         seen: list[tuple[str, str]] = []  # 重复调用检测
 
         for step_no in range(1, self.config.max_steps + 1):
+            # 上下文自动归档：超预算先把老旧的大块输出压成桩，
+            # 不至于长任务跑到一半被中转站按超长拒单。
+            self._maybe_archive()
             # 先试流式：纯文本回答能边生成边显示，这就是用户要的
             # 「不要一直等最后答案」。流式里也能收全分片的 tool_calls，
             # 所以两种回合都走得通；接口不支持流式时会抛 ProviderError，
