@@ -87,6 +87,24 @@ class Step:
     result: ToolResult | None = None
 
 
+
+def drain_inbox(inbox) -> str:
+    """取走累积的插话并拼成一条。没有就跑空。
+
+    inbox 用 queue.Queue：插话是从另一个 HTTP 线程塞进来的。
+    """
+    if inbox is None:
+        return ""
+    got = []
+    while True:
+        try:
+            item = inbox.get_nowait()
+        except Exception:
+            break
+        if item:
+            got.append(str(item))
+    return "\n".join(got)
+
 class Agent:
     """把模型、工具、循环控制拼在一起。"""
 
@@ -239,7 +257,8 @@ class Agent:
 
     # ---------- 主循环 ----------
 
-    async def run(self, prompt: str) -> AsyncIterator[Step]:
+    async def run(self, prompt: str, inbox=None, stop=None) -> AsyncIterator[Step]:
+        """inbox 收到用户插话就中断当前生成、带修正重新作答；stop 置位就收工。"""
         """跑一轮完整任务。以异步生成器形式产出每一步，便于实时显示。"""
         if self._client is None:
             self._client = Client(self.config.provider)
@@ -260,8 +279,23 @@ class Agent:
             # 退回下面的一次性请求。
             reply: Reply | None = None
             streamed = ""
+            stopped = interrupted = False
             try:
                 async for event in self._client.stream_reply(self.messages, specs):
+                    # 插话与停止：每个事件都看一眼。
+                    # 停止 → 立刻收工；插话 → 中断这轮生成，把修正插进
+                    # 历史后重新问一次，而不是等整轮跑完再排队。
+                    if stop is not None and stop.is_set():
+                        stopped = True
+                        break
+                    steer = drain_inbox(inbox)
+                    if steer:
+                        if streamed.strip():
+                            self.messages.append(Message(role="assistant", content=streamed))
+                        self.messages.append(Message(role="user", content=steer))
+                        yield Step("steer", text=steer)
+                        interrupted = True
+                        break
                     if event.get("type") == "text":
                         piece = event["text"]
                         streamed += piece
@@ -293,6 +327,11 @@ class Agent:
                 # 否则就以已经收到的为准（否则用户会看到重复内容）。
                 reply = Reply(content=streamed) if streamed else None
 
+            if stopped:
+                break
+            if interrupted:
+                # 用户已经给了修正，这一轮作废，带上新指令重新问
+                continue
             if reply is None and streamed:
                 # 纯文本回答：流式里已经收全了，直接当成这一轮的回复。
                 # 少了这一步，下面会再发一次完整请求去拿同样的内容——

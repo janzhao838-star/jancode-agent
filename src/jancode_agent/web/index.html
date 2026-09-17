@@ -632,6 +632,10 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
         // 非流式的整段回答：另起一段
         turn.answer = (turn.answer ? turn.answer + "\n" : "") + ev.text;
       }
+    } else if (ev.kind === "steer") {
+      // 用户插话：当前生成已被中断，模型带着修正重新作答。
+      // 记一笔，界面上标出来，让用户知道自己的话真的生效了。
+      turn.steers = (turn.steers || []).concat([ev.text]);
     } else if (ev.kind === "error") {
       turn.error = (ev.subagent ? "[" + ev.subagent + "] " : "") + ev.text;
     } else if (ev.kind === "done") {
