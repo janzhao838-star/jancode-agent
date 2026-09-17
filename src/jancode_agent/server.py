@@ -123,9 +123,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/skills":
             from dataclasses import asdict
 
-            from .library import list_skills
+            from .library import builtin_skills, list_skills
 
-            self._json({"ok": True, "skills": [asdict(s) for s in list_skills()]})
+            self._json({"ok": True, "skills": [asdict(s) for s in list_skills()],
+                        "builtins": builtin_skills()})
             return
         if self.path == "/api/agents":
             from dataclasses import asdict
@@ -159,10 +160,26 @@ class Handler(BaseHTTPRequestHandler):
             return {}
         return data if isinstance(data, dict) else {}
 
+    def _install_builtin(self, name: str, remove: bool) -> None:
+        from .library import delete_skill, install_builtin
+
+        if remove:
+            ok = delete_skill(name)
+            self._json({"ok": ok, "error": "" if ok else "这条技能没有装过"})
+            return
+        ok = install_builtin(name)
+        self._json({"ok": ok, "error": "" if ok else "没有这条内置技能"})
+
     def _edit_skill(self) -> None:
         from .library import delete_skill, upsert_skill
 
         payload = self._body()
+        if payload.get("install"):
+            self._install_builtin(str(payload["install"]), False)
+            return
+        if payload.get("uninstall"):
+            self._install_builtin(str(payload["uninstall"]), True)
+            return
         target = str(payload.get("delete") or "").strip()
         if target:
             ok = delete_skill(target)

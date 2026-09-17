@@ -155,6 +155,44 @@
   .kv b{color:hsl(var(--fg));font-weight:500}
   .drow{display:flex;justify-content:flex-end;gap:10px}
 </style>
+
+<style>
+/* ===== AionClaw 风格覆盖层：只覆盖，不改旧规则 ===== */
+:root{--b1:#7c5cff;--b2:#35c3e8;--card:#fff;--edge:#ececf1;--edge2:#d9d9e3;--ink:#1f2328;--mut:#6b7280;--soft:#f7f7f9}
+html,body{background:var(--soft)!important;color:var(--ink)}
+aside,.sidebar,#side,#sidebar{width:252px!important;min-width:252px!important;background:#fbfbfc!important;border-right:1px solid var(--edge)!important;padding:12px!important}
+main,.main,#main{background:var(--soft)!important}
+/* 侧栏菜单项：高一点、圆角、选中浅紫 + 左侧竖条 */
+[data-view]{display:flex!important;align-items:center;gap:9px;height:36px;padding:0 10px!important;border-radius:9px!important;font-size:13.5px;color:#3d434c!important;cursor:pointer;position:relative;transition:.14s}
+[data-view]:hover{background:#f1f1f5!important}
+[data-view].active,[data-view][aria-selected="true"]{background:#f2f0ff!important;color:#5b3ee8!important;font-weight:600}
+[data-view].active:before,[data-view][aria-selected="true"]:before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;background:linear-gradient(180deg,var(--b1),var(--b2))}
+/* 卡片网格 */
+#skillsBody,#agentsBody,#toolsBody{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))!important;gap:16px!important;align-content:start}
+#skillsBody>*,#agentsBody>*,#toolsBody>*{background:var(--card)!important;border:1px solid var(--edge)!important;border-radius:12px!important;padding:16px 16px 12px!important;position:relative;box-shadow:0 1px 2px rgba(16,24,40,.05);transition:.16s;min-height:132px;display:flex;flex-direction:column;gap:6px}
+#skillsBody>*:hover,#agentsBody>*:hover,#toolsBody>*:hover{border-color:var(--edge2)!important;box-shadow:0 2px 10px rgba(16,24,40,.09);transform:translateY(-1px)}
+.mg-tile{width:44px;height:44px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:19px;flex:none;margin-bottom:2px}
+.mg-desc{font-size:13px;color:var(--mut);line-height:1.55;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.mg-name{font-size:15px;font-weight:650;letter-spacing:.1px}
+.mg-tags{margin-top:auto;font-size:12.5px;color:#9aa1ab;display:flex;gap:6px;align-items:center}
+.mg-btn{position:absolute;right:12px;top:14px;height:28px;padding:0 11px;border-radius:7px;border:1px solid var(--edge);background:#fff;font-size:12.5px;color:#4b5563;cursor:pointer}
+.mg-btn:hover{border-color:#c9b8ff;color:#5b3ee8}
+.mg-tag-static{position:absolute;right:12px;top:16px;font-size:12px;color:#a2a8b2}
+/* 顶部工具条：页签 + 搜索 */
+.mg-bar{display:flex;align-items:center;gap:12px;margin:2px 0 14px;flex-wrap:wrap}
+.mg-tab{padding:7px 2px;font-size:14px;color:var(--mut);cursor:pointer;border-bottom:2px solid transparent;margin-right:6px}
+.mg-tab.on{color:var(--ink);font-weight:650;border-bottom-color:var(--ink)}
+.mg-pill{padding:5px 13px;border-radius:999px;background:#f1f1f5;font-size:12.5px;color:#4b5563;cursor:pointer}
+.mg-pill.on{background:#efeaff;color:#5b3ee8;font-weight:600}
+.mg-search{margin-left:auto;height:40px;min-width:240px;flex:1;border:1px solid var(--edge);border-radius:10px;padding:0 14px;background:#fff;font-size:13.5px;outline:none}
+.mg-search:focus{border-color:var(--b1);box-shadow:0 0 0 3px rgba(124,92,255,.13)}
+.mg-empty{grid-column:1/-1;text-align:center;color:var(--mut);padding:46px 0;font-size:13.5px}
+/* 按钮与输入 */
+button.primary,.primary{background:linear-gradient(135deg,var(--b1),var(--b2))!important;color:#fff!important;border:none!important;border-radius:10px!important;font-weight:600!important}
+input,textarea,select{border-radius:10px!important;border:1px solid var(--edge)!important;background:#fff!important}
+input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(--b1)!important;box-shadow:0 0 0 3px rgba(124,92,255,.13)!important}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#d4d4dc;border-radius:99px}::-webkit-scrollbar-thumb:hover{background:#bcbcc8}
+</style>
 </head>
 <body>
 <aside>
@@ -812,6 +850,167 @@
       hint.textContent = d.ok ? "测试消息已发送" : ("发送失败：" + (d.error || "未知原因"));
     }).catch(function () { hint.textContent = "发送失败：连不上本地服务"; });
   };
+})();
+</script>
+
+<script>
+/* 装饰层：只读原有 DOM 再包一层，任何错误都不影响原功能 */
+(function(){
+  var TILES=['#eef2ff','#e0f2fe','#f0fdf4','#fef3c7','#fce7f3','#f3e8ff'];
+  var GLYPH=['◆','✦','✧','▣','◈','✳','⚙','✺'];
+  function h(tag,cls,html){var e=document.createElement(tag);if(cls)e.className=cls;if(html!=null)e.innerHTML=html;return e;}
+  function firstText(el){
+    var best='';
+    el.querySelectorAll('*').forEach(function(n){
+      if(n.children.length)return;
+      var s=(n.textContent||'').trim();
+      if(s.length>best.length&&s.length<220)best=s;
+    });
+    return best;
+  }
+  function decorateCards(host){
+    if(!host)return;
+    var kids=Array.prototype.slice.call(host.children);
+    kids.forEach(function(card,idx){
+      if(card.classList.contains('mg-done'))return;
+      card.classList.add('mg-done');
+      var raw=card.innerHTML;
+      if(card.querySelector('.mg-tile'))return;
+      var texts=[];
+      card.querySelectorAll('*').forEach(function(n){if(!n.children.length){var s=(n.textContent||'').trim();if(s)texts.push(s);}});
+      var name=texts[0]||'';
+      var desc=texts.slice(1).join(' ').slice(0,140)||'';
+      card.innerHTML='';
+      var tile=h('div','mg-tile',GLYPH[idx%GLYPH.length]);
+      tile.style.background=TILES[idx%TILES.length];
+      card.appendChild(tile);
+      card.appendChild(h('div','mg-name',name));
+      if(desc)card.appendChild(h('div','mg-desc',desc));
+      card.appendChild(h('div','mg-tags','<span>'+(host.id==='toolsBody'?'内置 · 随程序提供':'本地 · 可用')+'</span>'));
+    });
+    if(!kids.length&&!host.querySelector('.mg-empty')){
+      host.appendChild(h('div','mg-empty','这里还是空的。点上面的按钮加一条，或者直接让智能体自己总结一条。'));
+    }
+  }
+  function addTileRow(){
+    var main=document.querySelector('main')||document.body;
+    document.querySelectorAll('[data-view]').forEach(function(el){
+      if(el.querySelector('.mg-ico'))return;
+      var svg='<svg class="mg-ico" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 2.5h11v8h-6l-3 3v-3h-2z"/></svg>';
+      el.insertAdjacentHTML('afterbegin',svg);
+    });
+  }
+  function buildBar(){
+    var view=document.getElementById('view-skills');
+    if(!view||view.querySelector('.mg-bar'))return;
+    var bar=h('div','mg-bar');
+    bar.innerHTML='<span class="mg-tab on" data-pane="skillsBody">技能</span><span class="mg-tab" data-pane="toolsBody">插件</span><span class="mg-tab" data-pane="mcp">MCP</span>'+
+      '<input class="mg-search" placeholder="搜索技能">';
+    var cats=h('div','mg-bar');cats.style.gap='8px';cats.id='mg-cats';
+    cats.innerHTML='<span class="mg-pill on" data-cat="全部">全部</span>';
+    view.insertBefore(cats,view.firstChild);
+    view.insertBefore(bar,view.firstChild);
+    var mcp=h('div','mg-empty','MCP 服务端暂未支持。插件页列的是智能体当前真正能调用的工具。');
+    mcp.id='mg-mcp';mcp.style.display='none';
+    view.appendChild(mcp);
+    var search=bar.querySelector('.mg-search');
+    function apply(){
+      var q=(search.value||'').trim().toLowerCase();
+      var cat=(cats.querySelector('.mg-pill.on')||{}).dataset?cats.querySelector('.mg-pill.on').dataset.cat:'全部';
+      var body=document.getElementById('skillsBody');
+      if(!body)return;
+      Array.prototype.forEach.call(body.children,function(c){
+        var text=(c.textContent||'').toLowerCase();
+        var okQ=!q||text.indexOf(q)>=0;
+        var okC=cat==='全部'||(cat==='其他'?!['效率','办公','技术','内容','数据','运维'].some(function(k){return text.indexOf(k)>=0;}):text.indexOf(cat.slice(0,2))>=0);
+        c.style.display=(okQ&&okC)?'':'none';
+      });
+    }
+    search.addEventListener('input',apply);
+    cats.addEventListener('click',function(e){
+      if(!e.target.dataset.cat)return;
+      cats.querySelectorAll('.mg-pill').forEach(function(p){p.classList.toggle('on',p===e.target);});
+      apply();
+    });
+    bar.addEventListener('click',function(e){
+      var pane=e.target.dataset&&e.target.dataset.pane;if(!pane)return;
+      bar.querySelectorAll('.mg-tab').forEach(function(t){t.classList.toggle('on',t===e.target);});
+      var sb=document.getElementById('skillsBody'),tb=document.getElementById('toolsBody'),m=document.getElementById('mg-mcp');
+      if(sb)sb.style.display=(pane==='skillsBody')?'':'none';
+      if(tb)tb.style.display=(pane==='toolsBody')?'':'none';
+      if(m)m.style.display=(pane==='mcp')?'':'none';
+    });
+  }
+  var sig='';
+  function renderSkills(){
+    var body=document.getElementById('skillsBody');
+    if(!body)return;
+    fetch('/api/skills').then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok)return;
+      var items=(d.builtins||[]).slice();
+      var names={};items.forEach(function(i){names[i.name]=1;});
+      (d.skills||[]).forEach(function(s){
+        if(!names[s.name])items.push({name:s.name,description:s.description||'我自己写的技能',category:'我的',installed:true,custom:true});
+      });
+      var next=items.map(function(i){return i.name+(i.installed?'+':'-');}).join('|');
+      if(next===sig)return;
+      sig=next;
+      body.innerHTML='';
+      var catBox=document.getElementById('mg-cats');
+      if(catBox){
+        var seen={},order=['全部'];
+        items.forEach(function(i){var c=i.category||'其他';if(!seen[c]){seen[c]=1;order.push(c);}});
+        var cur=(catBox.querySelector('.mg-pill.on')||{dataset:{}}).dataset.cat||'全部';
+        catBox.innerHTML='';
+        order.forEach(function(c){
+          var pill=h('span','mg-pill'+(c===cur?' on':''),c);
+          pill.dataset.cat=c;catBox.appendChild(pill);
+        });
+        catBox.style.display=order.length>2?'':'none';
+      }
+      if(!items.length){
+        body.appendChild(h('div','mg-empty','还没有技能。点上面「创建技能」写一条，或者直接让智能体自己总结一条。'));
+        return;
+      }
+      items.forEach(function(it,idx){
+        var card=h('div','mg-done');
+        card.style.cssText='background:#fff;border:1px solid #ececf1;border-radius:12px;padding:16px 16px 12px;position:relative;display:flex;flex-direction:column;gap:6px;min-height:132px;box-shadow:0 1px 2px rgba(16,24,40,.05)';
+        var tile=h('div','mg-tile',GLYPH[idx%GLYPH.length]);
+        tile.style.background=TILES[idx%TILES.length];
+        card.appendChild(tile);
+        card.appendChild(h('div','mg-name',it.name));
+        var btn=h('div','mg-btn',it.installed?'已安装':'安装');
+        btn.dataset.skill=it.name;btn.dataset.on=it.installed?'1':'0';
+        card.appendChild(btn);
+        card.appendChild(h('div','mg-desc',it.description||''));
+        card.appendChild(h('div','mg-tags','<span>'+((it.category||'技能')+(it.custom?' · 我写的':' · 内置'))+'</span>'));
+        body.appendChild(card);
+      });
+    }).catch(function(){});
+  }
+  document.addEventListener('click',function(e){
+    var b=e.target.closest?e.target.closest('.mg-btn'):null;
+    if(!b||!b.dataset.skill)return;
+    var name=b.dataset.skill,on=b.dataset.on==='1';
+    b.textContent=on?'卸载中…':'安装中…';
+    fetch('/api/skills',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(on?{uninstall:name}:{install:name})})
+      .then(function(r){return r.json();}).then(function(d){
+        var hint=document.getElementById('hint');
+        if(hint)hint.textContent=d&&d.ok?(on?('已卸载「'+name+'」'):('已安装「'+name+'」，之后每次任务都会照它做')):('操作失败：'+((d&&d.error)||'原因未知'));
+        sig='';renderSkills();
+      }).catch(function(){b.textContent=on?'已安装':'安装';});
+  });
+  function tick(){
+    try{
+      addTileRow();buildBar();renderSkills();
+      decorateCards(document.getElementById('agentsBody'));
+      decorateCards(document.getElementById('toolsBody'));
+    }catch(e){}
+  }
+  tick();
+  setInterval(tick,1200);
+  new MutationObserver(tick).observe(document.documentElement,{childList:true,subtree:true});
 })();
 </script>
 </body>
