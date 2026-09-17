@@ -159,7 +159,10 @@ def main(argv: list[str] | None = None) -> int:
             "命令行安装：pip install \"jancode-agent[desktop]\"\n"
             "或者直接用网页版：jancode-agent --web")
 
-    if not config.provider.api_key:
+    # 看的是服务端最终生效的配置，而不是本地这份 config：
+    # 界面里保存过的设置是在 build_server 里才合并进去的，
+    # 用本地这份判断会把「已经配好了」误报成「还没配」。
+    if not httpd.RequestHandlerClass.config.provider.api_key:
         print("还没有配置 API 密钥：在界面右下角点「设置」填上接口地址与密钥。",
               file=sys.stderr, flush=True)
     print(f"JanCode 智能体已启动：{url}", flush=True)
