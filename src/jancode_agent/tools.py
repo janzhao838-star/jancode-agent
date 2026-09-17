@@ -451,8 +451,8 @@ class Toolbox:
                 "parameters": obj(
                     {
                         "name": {"type": "string", "description": "技能名，简短好认，例如「发版流程」"},
-                        "description": {"type": "string", "description": "一句话说明它解决什么问题",
-                                        "description_zh": ""},
+                        "description": {"type": "string",
+                                        "description": "一句话说明它解决什么问题"},
                         "content": {"type": "string",
                                     "description": "具体做法，写成照着做就能复现的样子"},
                     },

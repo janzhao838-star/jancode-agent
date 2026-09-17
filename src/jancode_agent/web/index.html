@@ -1385,59 +1385,74 @@ main,.main,#main{overflow:hidden}
 </script>
 
 <script>
-/* MCP 栏：不做假的「安装」按钮。
-   分两类如实标注：我们的内置工具已经等价具备的能力 / 需要 MCP 协议支持（尚未实现）。 */
+/* MCP 栏：接真实后端。显示已配置的服务、运行状态、工具数，
+   一键添加常用服务（真实写进 ~/.jancode-agent/mcp.json 并启动）。 */
 (function(){
-  var CAT=[
-    ["Fetch 网页抓取","抓取网页并转成适合模型读的文本","内置已具备：web_fetch 工具"],
-    ["Filesystem 文件","读写、检索本地文件","内置已具备：read/write/edit/glob/grep"],
-    ["Playwright 浏览器","浏览器自动化与截图","内置已具备：bash 里可驱动浏览器"],
-    ["GitHub","仓库、issue、PR 管理","内置已具备：bash + git 命令"],
-    ["GitLab","GitLab API 集成","内置已具备：bash + git/curl"],
-    ["TodoList 任务","任务清单管理","内置已具备：待办拆解技能"],
-    ["Context7 文档","拉取最新库文档和代码示例","内置已具备：web_fetch + 公开信息检索技能"],
-    ["Tavily 搜索","实时网页搜索与内容提取","需要搜索 API 密钥，暂未内置"],
-    ["Firecrawl","网页抓取与结构化提取","需 MCP 协议支持（未实现）"],
-    ["Notion","页面与数据库操作","需 MCP 协议支持（未实现）"],
-    ["Slack","频道与消息","需 MCP 协议支持（未实现）"],
-    ["Gmail","邮件收发与检索","需 MCP 协议支持（未实现）"],
-    ["Google Drive","文件访问与搜索","需 MCP 协议支持（未实现）"],
-    ["Google Calendar","日历管理","需 MCP 协议支持（未实现）"],
-    ["Canva","设计平台集成","需 MCP 协议支持（未实现）"],
-    ["企查查","企业工商信息查询","需 MCP 协议支持（未实现）"]
+  var PRESETS=[
+    ["文件系统","读写本地文件（沙箱内）","npx",["-y","@modelcontextprotocol/server-filesystem","./"]],
+    ["Fetch 抓网页","抓取网页转文本","npx",["-y","@modelcontextprotocol/server-fetch"]],
+    ["Memory 记忆","跨会话知识图谱记忆","npx",["-y","@modelcontextprotocol/server-memory"]],
+    ["Sequential Thinking","分步推理","npx",["-y","@modelcontextprotocol/server-sequential-thinking"]],
+    ["Git","读取仓库状态与历史","npx",["-y","@modelcontextprotocol/server-git"]],
+    ["Everything 示例","官方示例服务，用来验证连通","npx",["-y","@modelcontextprotocol/server-everything"]]
   ];
-  var TILES=['#eef2ff','#e0f2fe','#f0fdf4','#fef3c7','#fce7f3','#f3e8ff'];
   function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
-  function paint(){
+  function post(b){return fetch('/api/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json();});}
+  var servers=[], loaded=false;
+  function render(){
     var grid=document.getElementById('mg-grid');
-    if(!grid||grid.dataset.mcp==='1')return;
-    grid.dataset.mcp='1';
+    if(!grid)return;
     grid.innerHTML='';
-    var head=el('div','','MCP 服务端');
-    head.style.cssText='grid-column:1/-1;font-size:13px;color:#6b7280;line-height:1.7;margin-bottom:4px';
-    head.textContent='我们的智能体本身带工具（读写文件、执行命令、抓网页、子智能体），下面标「内置已具备」的就是这些能力。MCP 协议本身（启动外部 MCP 服务并接入其工具）尚未实现，所以不放假按钮。';
+    var head=el('div');head.style.cssText='grid-column:1/-1;font-size:13px;color:#6b7280;line-height:1.7;margin-bottom:4px';
+    head.textContent='MCP 服务会作为工具接进智能体：配置好之后，对话里就能直接调用它的工具。密钥存在本机（权限 600），不上传。';
     grid.appendChild(head);
-    CAT.forEach(function(row,i){
+
+    (servers||[]).forEach(function(s){
       var c=el('div','mg-card');
-      var tile=el('div','mg-tile','◈');tile.style.background=TILES[i%TILES.length];
+      var tile=el('div','mg-tile','◈');tile.style.background=s.running?'#f0fdf4':'#fef3c7';
       c.appendChild(tile);
-      var main=el('div','mg-main');
-      var hd=el('div','mg-head');hd.appendChild(el('span','mg-name',row[0]));
-      var ok=row[2].indexOf('内置')===0;
-      var b=el('span','mg-btn',ok?'内置已具备':'未支持');
-      if(!ok){b.style.color='#9aa1ab';b.style.cursor='default';}
-      hd.appendChild(b);main.appendChild(hd);
-      main.appendChild(el('div','mg-desc',row[1]));
-      main.appendChild(el('div','mg-tags',row[2]));
-      c.appendChild(main);grid.appendChild(c);
+      var m=el('div','mg-main');m.style.flex='1;min-width:0';
+      var hd=el('div','mg-head');
+      hd.appendChild(el('span','mg-name',s.name));
+      var dot=el('span','mg-btn',s.running?(s.tools.length+' 个工具'):'未运行');
+      if(!s.running)dot.style.color='#dc2626';
+      hd.appendChild(dot);m.appendChild(hd);
+      m.appendChild(el('div','mg-desc',s.error?('启动失败：'+s.error):('命令：'+s.command)));
+      var rm=el('span','mg-btn','移除');
+      rm.onclick=function(){rm.textContent='移除中…';post({action:'remove',name:s.name}).then(function(d){servers=d.servers||[];render();});};
+      hd.appendChild(rm);
+      c.appendChild(m);grid.appendChild(c);
+    });
+
+    PRESETS.forEach(function(ps){
+      var has=(servers||[]).filter(function(x){return x.name===ps[0];})[0];
+      var c=el('div','mg-card');
+      var tile=el('div','mg-tile','＋');tile.style.background='#eef2ff';
+      c.appendChild(tile);
+      var m=el('div','mg-main');m.style.flex='1;min-width:0';
+      var hd=el('div','mg-head');
+      hd.appendChild(el('span','mg-name',ps[0]));
+      var b=el('span','mg-btn',has?'已添加':'安装');
+      if(has)b.style.color='#16a34a';
+      else b.onclick=function(){
+        b.textContent='安装中…（首次要下载，稍等）';
+        post({action:'add',name:ps[0],command:ps[2],args:ps[3]}).then(function(d){
+          if(!d.ok){b.textContent='失败：'+(d.error||'');return;}
+          servers=d.servers||[];render();
+        }).catch(function(){b.textContent='连不上本地服务';});
+      };
+      hd.appendChild(b);m.appendChild(hd);
+      m.appendChild(el('div','mg-desc',ps[1]));
+      c.appendChild(m);grid.appendChild(c);
     });
   }
+  function load(){fetch('/api/mcp').then(function(r){return r.json();}).then(function(d){servers=d.servers||[];loaded=true;render();}).catch(function(){});}
   document.addEventListener('click',function(e){
     var tb=e.target&&e.target.classList&&e.target.classList.contains('mg-tab')?e.target:null;
     if(!tb)return;
-    if(tb.textContent.trim()==='MCP'){setTimeout(paint,60);}
-    else{var g=document.getElementById('mg-grid');if(g)g.dataset.mcp='';}
+    if(tb.textContent.trim()==='MCP'){setTimeout(function(){load();},60);}
   });
+  var iv=setInterval(function(){try{var g=document.getElementById('mg-grid');if(g&&g.dataset.mcp==='1'){g.dataset.mcp='';clearInterval(iv);}}catch(e){}},800);
 })();
 </script>
 
