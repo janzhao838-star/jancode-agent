@@ -137,6 +137,12 @@ async def check_connection(cfg: AgentConfig, timeout: float = 15.0) -> Check:
     if resp.status_code >= 500:
         return Check("连接中转站", BAD, f"{base} 返回 {resp.status_code}",
                      "对方服务器出错。如果是自建站，去看服务日志。")
+    if 300 <= resp.status_code < 400:
+        # 客户端默认不跟重定向：3xx 多半是地址写错被弹到登录页之类，
+        # 报成「正常」会误导用户以为万事大吉。
+        return Check("连接中转站", BAD, f"{base} 返回重定向 {resp.status_code}",
+                     "这个地址没有直接提供接口——base_url 多半写错了。"
+                     f"重定向目标：{resp.headers.get('location', '（未给出）')}")
     if resp.status_code < 400:
         return Check("连接中转站", OK, f"{base} 正常响应")
     # 4xx 但不是鉴权错误：说明地址和密钥都对，只是我们发的参数不全

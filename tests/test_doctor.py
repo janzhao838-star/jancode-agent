@@ -146,3 +146,30 @@ def test_自检会用命令行给的密钥和地址(capsys, tmp_path):
     assert rc == 0, "带上了密钥，自检不该报失败"
     # 顺带守住：自检可以报密钥长度，但不能把密钥本身打出来
     assert "sk-x" not in out, "自检把密钥回显出来了"
+
+def test_重定向不再误报为正常(tmp_path):
+    """base_url 写错时很多站点会 302 到登录页。
+
+    以前 3xx 落进「< 400 就算正常」的分支，自检给出绿灯，
+    用户以为万事大吉，实际一次对话都不会成功。
+    """
+    import tests.mock_server as ms
+    url, httpd = start([chat_reply("x")])
+    original = ms._Handler.do_POST
+
+    def redirect_302(self):
+        body = b""
+        self.send_response(302)
+        self.send_header("Location", "/login")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    ms._Handler.do_POST = redirect_302
+    try:
+        c = asyncio.run(check_connection(cfg(tmp_path, base_url=url), timeout=10))
+        assert c.status == BAD
+        assert "302" in c.detail
+        assert "/login" in c.fix
+    finally:
+        ms._Handler.do_POST = original
+        httpd.shutdown()

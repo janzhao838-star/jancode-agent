@@ -41,8 +41,10 @@ BUILTIN_PRESETS = [
 
 
 def find_preset(name):
-    """按名字找内置预设。找不到返回 None。"""
+    """按名字找内置预设。找不到返回 None。
+    返回浅拷贝：调用方万一改到返回值，也不能污染随代码分发的预设本体。
+    """
     for preset in BUILTIN_PRESETS:
         if preset["name"] == name:
-            return preset
+            return dict(preset)
     return None

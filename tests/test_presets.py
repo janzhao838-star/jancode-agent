@@ -108,3 +108,19 @@ def test_preset_modes_all_valid():
     valid = {"auto", "sandbox", "plan", "readonly"}
     for p in BUILTIN_PRESETS:
         assert p["mode"] in valid, f"{p[chr(110)+chr(97)+chr(109)+chr(101)]} 的 mode 不合法"
+
+def test_改返回值不污染预设本体():
+    """find_preset 必须给拷贝。调用方改了返回值，
+    随代码分发的预设不能跟着变——否则这个进程里后续
+    所有「以此为准」拿到的都是被改脏的预设。
+    """
+    from jancode_agent.presets import BUILTIN_PRESETS, find_preset
+
+    preset = find_preset("标准模式")
+    preset["system_prompt"] = "被我改了"
+    preset["mode"] = "plan"
+
+    original = next(p for p in BUILTIN_PRESETS if p["name"] == "标准模式")
+    assert original["system_prompt"] == ""
+    assert original["mode"] == "auto"
+    assert find_preset("标准模式")["mode"] == "auto"
