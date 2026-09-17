@@ -66,3 +66,19 @@ def test_预设里没有推广码():
         blob = " ".join(spec.values())
         for bad in ("aff=", "ref=", "referral", "invite", "/i/"):
             assert bad not in blob, f"供应商 {name} 含推广参数 {bad}"
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolate_env(monkeypatch):
+    """把和模型接入相关的环境变量清干净。
+
+    这些测试断言的是「没有配置时用什么默认值」，可开发机的 shell 里
+    往往导出着 OPENAI_BASE_URL 之类的东西（本机就有，指向另一个中转站）——
+    不清掉的话，测试结果就取决于跑测试的人机器上装了什么。
+    """
+    for name in ("JANCODE_API_KEY", "JANCODE_BASE_URL", "JANCODE_MODEL",
+                 "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL"):
+        monkeypatch.delenv(name, raising=False)

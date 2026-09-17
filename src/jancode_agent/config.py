@@ -117,9 +117,12 @@ def _env_override(provider: ProviderConfig) -> ProviderConfig:
 
     JANCODE_API_KEY 优先级最高，因为密钥最不该写进文件。
     """
-    key = os.environ.get("JANCODE_API_KEY", "").strip()
-    base = os.environ.get("JANCODE_BASE_URL", "").strip()
-    model = os.environ.get("JANCODE_MODEL", "").strip()
+    # 中转站给的接入片段基本都是 OPENAI_* 这套通用变量，
+    # 只认自己的 JANCODE_* 就等于「照抄文档里的命令却不生效」。
+    # 两套都认，自己的优先。
+    key = _env_first("JANCODE_API_KEY", "OPENAI_API_KEY")
+    base = _env_first("JANCODE_BASE_URL", "OPENAI_BASE_URL")
+    model = _env_first("JANCODE_MODEL", "OPENAI_MODEL")
     changes: dict[str, str] = {}
     if key:
         changes["api_key"] = key
@@ -142,6 +145,15 @@ def _provider_from_name(name: str, api_key: str = "") -> ProviderConfig:
         label=spec["label"],
         api_key=api_key,
     )
+
+
+def _env_first(*names: str) -> str:
+    """按顺序取第一个非空的环境变量。"""
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
 
 
 def load_config(
