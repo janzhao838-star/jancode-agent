@@ -127,9 +127,11 @@ def reply_from_payload(data: dict[str, Any]) -> Reply:
             name=fn.get("name") or "",
             arguments=args,
         ))
+    # 与 _parse_chat 同一规矩：name 为空的坏分片不进循环，
+    # 否则 Agent 会去调一个空名工具，报错给用户看。
     return Reply(
         content=msg.get("content") or "",
-        tool_calls=calls,
+        tool_calls=[c for c in calls if c.name],
         finish_reason=choice.get("finish_reason") or "",
         usage=data.get("usage") or {},
     )
