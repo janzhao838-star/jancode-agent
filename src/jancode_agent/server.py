@@ -782,7 +782,12 @@ class Handler(BaseHTTPRequestHandler):
         }
         # 模式先进 config：Toolbox 会拿它做代码级拦截。
         # 不认识的模式一律当 auto，避免「写错了就变放行」这种意外。
-        config = replace(config, mode=mode if mode in MODES else "auto")
+        # 写错的模式名不该变成放行：退回最严格的 readonly，
+        # 宁可多拦一次让用户去切模式，也不能因为拼错就悄悄放开。
+        if mode not in MODES and mode:
+            config = replace(config, mode="readonly")
+        else:
+            config = replace(config, mode=mode or "auto")
         if mode in MODES:
             base_extra = config.system_extra or ""
             config = replace(config, system_extra=(base_extra + "\n\n" + MODES[mode]).strip())

@@ -70,3 +70,16 @@ def test_sandbox放行只读命令(tmp_path):
     # 只看不写的外部路径不该拦，否则连 /etc/hosts 都不能看了
     tb = Toolbox(tmp_path, mode="sandbox")
     assert run(tb.bash("cat /etc/hosts")).ok
+
+
+def test_模式名不认识时按最严格处理(tmp_path):
+    # 拼错模式名绝不能变成放行：用户以为自己在受限模式里，
+    # 实际全放开是最糟的结果。所以不认识的模式按只读处理。
+    tb = Toolbox(tmp_path, mode="readonyl")
+    r = run(tb.write_file("a.txt", "x"))
+    assert not r.ok
+    assert "无法识别" in r.output
+    assert not (tmp_path / "a.txt").exists()
+    # 只读类工具仍然放行，否则连看都看不了
+    (tmp_path / "b.txt").write_text("内容", encoding="utf-8")
+    assert run(tb.read_file("b.txt")).ok

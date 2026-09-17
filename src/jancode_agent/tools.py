@@ -47,6 +47,9 @@ READ_ONLY_TOOLS = frozenset({"read_file", "list_dir", "grep"})
 # 这两种模式在代码层面禁止一切有副作用的工具。
 NO_SIDE_EFFECT_MODES = frozenset({"readonly", "plan"})
 
+# 认识的模式。不在这个集合里的名字按最严格处理，不按放行处理。
+KNOWN_MODES = frozenset({"auto", "sandbox", "plan", "readonly"})
+
 # sandbox 模式判「有没有写入意图」用的关键词。
 _SANDBOX_WRITE_HINTS = (
     " > ", " >> ", ">>", "tee ", " cp ", " mv ", " rm ", " mkdir ",
@@ -90,6 +93,16 @@ class Toolbox:
         为什么要有这一层：四个模式原先只写进系统提示词。提示词是「请求」，
         模型不听话就直接动手改文件了。这里是「拒绝」，两者缺一不可。
         """
+        if self.mode not in KNOWN_MODES:
+            # 模式名不认识（拼错了、或者从旧版本传来一个废弃值）：
+            # 按最严格的只读处理。静默放行是最糟的选择——
+            # 用户以为自己在受限模式里，实际却全放开了。
+            if name not in READ_ONLY_TOOLS:
+                return (
+                    f"工作模式 {self.mode!r} 无法识别，已按最严格的「只读」处理，"
+                    f"因此不允许执行 {name}。请检查界面上的模式设置。"
+                )
+            return None
         if self.mode in NO_SIDE_EFFECT_MODES and name not in READ_ONLY_TOOLS:
             label = "计划" if self.mode == "plan" else "只读"
             return (
