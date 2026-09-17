@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tomllib
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -165,8 +166,16 @@ def load_config(
     path = path or DEFAULT_CONFIG_PATH
     raw: dict = {}
     if path.is_file():
-        with path.open("rb") as fh:
-            raw = tomllib.load(fh)
+        try:
+            with path.open("rb") as fh:
+                raw = tomllib.load(fh)
+        except tomllib.TOMLDecodeError as exc:
+            # 配置写坏一行不该让程序直接崩：回退内置默认并指路。
+            # 不抛异常是本函数的约定（docstring 写明），坏文件静默忽略
+            # 又太坑——打印到 stderr，用户至少知道为什么没生效。
+            print(f"配置文件 {path} 解析失败，已忽略（{exc}）。",
+                  file=sys.stderr, flush=True)
+            raw = {}
 
     provider_table = raw.get("provider", {})
     name = provider_name or provider_table.get("name") or "janzhao"
