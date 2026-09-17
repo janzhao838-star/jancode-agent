@@ -272,6 +272,7 @@ class Agent:
                 # 重复调用检测：同工具同参数连续出现，说明模型在打转
                 signature = (tc.name, json.dumps(tc.arguments, sort_keys=True, ensure_ascii=False))
                 repeats = seen.count(signature)
+                seen.append(signature)
                 if repeats >= 4:
                     # 同一条命令连打四次以上才算打转，才真的中止。
                     note = (
@@ -300,7 +301,6 @@ class Agent:
                         name=tc.name,
                     ))
                     continue
-                seen.append(signature)
 
                 # 工具结果由「结束」那一步带回来（见 Step.result 的说明）
                 result: ToolResult | None = None
