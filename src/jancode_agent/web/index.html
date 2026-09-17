@@ -715,7 +715,7 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
     if (row.getAttribute("data-d") === "1") { loadFiles(full); return; }
     var box = $("filepre");
     if (box) box.innerHTML = '<div class="filepre">读取中…</div>';
-    fetch("/api/file?path=" + encodeURIComponent(full)).then(function (r) { return r.json(); }).then(function (d) {
+    fetch("/api/files?path=" + encodeURIComponent(full)).then(function (r) { return r.json(); }).then(function (d) {
       if (box) box.innerHTML = '<div class="filepre">' + esc(d.ok ? d.text : d.error) + '</div>';
     });
   }
