@@ -10,6 +10,21 @@
 
 from __future__ import annotations
 
+
+# Windows 控制台默认是 GBK，中文/符号输出会直接抛 UnicodeEncodeError 把进程打崩。
+# 这里强制成 UTF-8 并允许替换无法编码的字符：宁可个别字符变成问号，也不能崩。
+def _force_utf8_output() -> None:
+    import sys
+
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+_force_utf8_output()
+
 import argparse
 import asyncio
 import sys

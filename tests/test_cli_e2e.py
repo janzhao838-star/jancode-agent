@@ -43,7 +43,7 @@ def run_cli(workspace, script, *extra):
             [sys.executable, "-m", "jancode_agent.cli",
              "--base-url", base, "--api-key", "test-key",
              "--workspace", str(workspace), *extra, "帮我查个东西"],
-            capture_output=True, text=True, timeout=120, env=_child_env(),
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, env=_child_env(),
         )
     finally:
         httpd.shutdown()
@@ -127,7 +127,7 @@ def test_图形界面用命令行给的密钥和地址(tmp_path):
          "--web", "--no-open", "--port", str(port),
          "--api-key", "sk-cli", "--base-url", "http://127.0.0.1:9/v1",
          "--model", "cli-模型", "--workspace", str(tmp_path)],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
         env=_child_env(),
     )
     try:

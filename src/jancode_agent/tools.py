@@ -270,7 +270,8 @@ class Toolbox:
                 continue
             for i, line in enumerate(text.splitlines(), 1):
                 if regex.search(line):
-                    rel = f.relative_to(self.workspace) if self.workspace in f.parents else f
+                    rel = (f.relative_to(self.workspace).as_posix()
+                           if self.workspace in f.parents else f)
                     hits.append(f"{rel}:{i}: {line.strip()[:200]}")
                     if len(hits) >= MAX_GREP_HITS:
                         break
