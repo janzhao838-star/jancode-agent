@@ -168,7 +168,21 @@ main,.main,#main{background:var(--soft)!important}
 [data-view].active,[data-view][aria-selected="true"]{background:#f2f0ff!important;color:#5b3ee8!important;font-weight:600}
 [data-view].active:before,[data-view][aria-selected="true"]:before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;background:linear-gradient(180deg,var(--b1),var(--b2))}
 /* 卡片网格 */
-#skillsBody,#agentsBody,#toolsBody{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))!important;gap:16px!important;align-content:start}
+#skillsBody,#agentsBody,#toolsBody{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(420px,1fr))!important;gap:16px!important;align-content:start}
+.mg-card{background:#f8f8f9!important;border:1px solid transparent!important;border-radius:14px!important;padding:20px!important;display:flex!important;gap:16px!important;align-items:flex-start!important;box-shadow:none!important}
+.mg-card:hover{background:#f4f4f6!important;transform:none!important}
+.mg-main{flex:1;min-width:0}
+.mg-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.mg-tile{width:56px!important;height:56px!important;border-radius:11px!important;font-size:24px!important;margin:0!important}
+.mg-name{font-size:17px!important;font-weight:650}
+.mg-desc{font-size:13.5px!important;color:#6b7280!important;line-height:1.6;margin-top:7px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.mg-tags{margin-top:13px!important;font-size:13px!important;color:#9aa1ab!important}
+.mg-btn{position:static!important;height:30px!important;padding:0 12px!important;border-radius:8px!important;border:1px solid #e3e3e8!important;background:#fff!important;font-size:13px!important;gap:5px;flex:none}
+.mg-btn:hover{border-color:#c9b8ff!important;color:#5b3ee8!important}
+/* 分类页签：纯文字 + 选中下划线，不用胶囊 */
+.mg-pill{background:none!important;padding:6px 0!important;border-radius:0!important;font-size:14px!important;color:#6b7280!important;border-bottom:2px solid transparent;margin-right:20px}
+.mg-pill.on{background:none!important;color:#1f2328!important;font-weight:650;border-bottom-color:#1f2328}
+#mg-cats{border-bottom:1px solid #ececf1;width:100%;padding-bottom:0;gap:0!important;overflow-x:auto;flex-wrap:nowrap}
 #skillsBody>*,#agentsBody>*,#toolsBody>*{background:var(--card)!important;border:1px solid var(--edge)!important;border-radius:12px!important;padding:16px 16px 12px!important;position:relative;box-shadow:0 1px 2px rgba(16,24,40,.05);transition:.16s;min-height:132px;display:flex;flex-direction:column;gap:6px}
 #skillsBody>*:hover,#agentsBody>*:hover,#toolsBody>*:hover{border-color:var(--edge2)!important;box-shadow:0 2px 10px rgba(16,24,40,.09);transform:translateY(-1px)}
 .mg-tile{width:44px;height:44px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:19px;flex:none;margin-bottom:2px}
@@ -930,6 +944,8 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
     cats.addEventListener('click',function(e){
       if(!e.target.dataset.cat)return;
       cats.querySelectorAll('.mg-pill').forEach(function(p){p.classList.toggle('on',p===e.target);});
+      cats.dataset.pick=e.target.dataset.cat;
+      sig='';renderSkills();
       apply();
     });
     bar.addEventListener('click',function(e){
@@ -952,38 +968,47 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
       (d.skills||[]).forEach(function(s){
         if(!names[s.name])items.push({name:s.name,description:s.description||'我自己写的技能',category:'我的',installed:true,custom:true});
       });
-      var next=items.map(function(i){return i.name+(i.installed?'+':'-');}).join('|');
-      if(next===sig)return;
-      sig=next;
-      body.innerHTML='';
+      var next=items.map(function(i){return i.name+(i.installed?'+':'-');}).join('|')+((document.getElementById('mg-cats')||{dataset:{}}).dataset.pick||'');
+      if(next===sig)return;sig=next;
+      var view=document.getElementById('view-skills');
+      if(view&&!view.querySelector('.mg-intro')){
+        var intro=h('div','mg-intro','');
+        intro.style.cssText='font-size:13px;color:#6b7280;line-height:1.6;max-width:520px;margin:0 0 12px';
+        intro.textContent='为你的智能体提供预封装、可重复的最佳实践与工具';
+        if(cats.parentNode===view)view.insertBefore(intro,cats);else view.insertBefore(intro,view.firstChild);
+      }
       var catBox=document.getElementById('mg-cats');
+      var cur=(catBox&&catBox.dataset.pick)||'全部';
+      body.innerHTML='';
       if(catBox){
-        var seen={},order=['全部'];
+        var seen={},order=['全部','精选'];
         items.forEach(function(i){var c=i.category||'其他';if(!seen[c]){seen[c]=1;order.push(c);}});
-        var cur=(catBox.querySelector('.mg-pill.on')||{dataset:{}}).dataset.cat||'全部';
         catBox.innerHTML='';
         order.forEach(function(c){
           var pill=h('span','mg-pill'+(c===cur?' on':''),c);
           pill.dataset.cat=c;catBox.appendChild(pill);
         });
-        catBox.style.display=order.length>2?'':'none';
       }
-      if(!items.length){
-        body.appendChild(h('div','mg-empty','还没有技能。点上面「创建技能」写一条，或者直接让智能体自己总结一条。'));
+      var shown=items.filter(function(i){return cur==='全部'||cur==='精选'||(i.category||'其他')===cur;});
+      if(!shown.length){
+        body.appendChild(h('div','mg-empty',items.length?'这个分类下还没有技能。':'还没有技能。点「创建技能」写一条，或者直接让智能体自己总结一条。'));
         return;
       }
-      items.forEach(function(it,idx){
-        var card=h('div','mg-done');
-        card.style.cssText='background:#fff;border:1px solid #ececf1;border-radius:12px;padding:16px 16px 12px;position:relative;display:flex;flex-direction:column;gap:6px;min-height:132px;box-shadow:0 1px 2px rgba(16,24,40,.05)';
+      shown.forEach(function(it,idx){
+        var card=h('div','mg-done mg-card');
         var tile=h('div','mg-tile',GLYPH[idx%GLYPH.length]);
         tile.style.background=TILES[idx%TILES.length];
         card.appendChild(tile);
-        card.appendChild(h('div','mg-name',it.name));
-        var btn=h('div','mg-btn',it.installed?'已安装':'安装');
+        var main=h('div','mg-main');
+        var head=h('div','mg-head');
+        head.appendChild(h('span','mg-name',it.name));
+        var btn=h('div','mg-btn',(it.installed?'✓ 已安装':'⬇ 安装'));
         btn.dataset.skill=it.name;btn.dataset.on=it.installed?'1':'0';
-        card.appendChild(btn);
-        card.appendChild(h('div','mg-desc',it.description||''));
-        card.appendChild(h('div','mg-tags','<span>'+((it.category||'技能')+(it.custom?' · 我写的':' · 内置'))+'</span>'));
+        head.appendChild(btn);
+        main.appendChild(head);
+        main.appendChild(h('div','mg-desc',it.description||''));
+        main.appendChild(h('div','mg-tags','Server · v1.0.0'));
+        card.appendChild(main);
         body.appendChild(card);
       });
     }).catch(function(){});
