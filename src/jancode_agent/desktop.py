@@ -108,8 +108,13 @@ def main(argv: list[str] | None = None) -> int:
         return _fail(str(exc), alert=not args.selftest)
 
     port = args.port or free_port()
+    # require_key=False：没配密钥也要把界面开起来。
+    # 以前这里是直接退出——用户双击得到一个弹窗就没了，而填密钥的地方
+    # 恰恰就在界面里，等于把唯一的路堵死。现在改成：界面照常打开，
+    # 提示去哪儿填，填完立刻能用。
     try:
-        httpd = build_server(host="127.0.0.1", port=port, config=config)
+        httpd = build_server(host="127.0.0.1", port=port, config=config,
+                             require_key=False)
     except MissingApiKey as exc:
         return _fail(str(exc), alert=not args.selftest)
     except OSError as exc:
@@ -154,6 +159,9 @@ def main(argv: list[str] | None = None) -> int:
             "命令行安装：pip install \"jancode-agent[desktop]\"\n"
             "或者直接用网页版：jancode-agent --web")
 
+    if not config.provider.api_key:
+        print("还没有配置 API 密钥：在界面右下角点「设置」填上接口地址与密钥。",
+              file=sys.stderr, flush=True)
     print(f"JanCode 智能体已启动：{url}", flush=True)
     webview.create_window(WINDOW_TITLE, url, width=args.width, height=args.height,
                           min_size=(720, 520))

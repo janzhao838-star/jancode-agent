@@ -507,7 +507,8 @@ class MissingApiKey(RuntimeError):
 
 def build_server(host: str = "127.0.0.1", port: int = 8765, workspace: Path | None = None,
                  provider: str | None = None,
-                 config: AgentConfig | None = None) -> ThreadingHTTPServer:
+                 config: AgentConfig | None = None,
+                 require_key: bool = True) -> ThreadingHTTPServer:
     """装配好配置、建好服务，但**不启动**。
 
     把「建」和「跑」分开是为了桌面版：它要在后台线程里跑 serve_forever，
@@ -516,7 +517,7 @@ def build_server(host: str = "127.0.0.1", port: int = 8765, workspace: Path | No
     """
     Handler.config = apply_saved_settings(config or load_config(
         provider_name=provider, workspace=workspace or Path.cwd()))
-    if not Handler.config.provider.api_key:
+    if require_key and not Handler.config.provider.api_key:
         raise MissingApiKey(
             "未提供 API 密钥。请设置环境变量 JANCODE_API_KEY 后重试。")
     return ThreadingHTTPServer((host, port), Handler)

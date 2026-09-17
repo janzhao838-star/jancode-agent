@@ -281,7 +281,7 @@
     $("ws").textContent = d.workspace; $("ws").title = d.workspace;
     $("mdl").textContent = (d.label ? d.label + " · " : "") + d.model;
     $("mdl").title = d.base_url;
-    if (!d.has_key) hint.textContent = "未配置 API 密钥，无法执行任务";
+    if (!d.has_key) hint.textContent = "还没有配置密钥：点右下角「设置」填上接口地址和密钥";
     renderSide(); renderMain();
   }).catch(function () { hint.textContent = "无法连接本地服务"; });
 
