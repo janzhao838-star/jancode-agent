@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -78,7 +79,16 @@ def _load(path: Path) -> list[dict]:
 
 def _save(path: Path, items: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 原子写：直接 write_text 覆盖的话，写入中途崩溃/断电会留下截断的
+    # JSON，_load 读不出来就返回空列表——用户的技能库会静默清空。
+    # 先写同目录临时文件（保证 os.replace 同分区原子改名），再换名顶上。
+    text = json.dumps(items, ensure_ascii=False, indent=2)
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(text)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
 
 
 # ---------- 技能 ----------
