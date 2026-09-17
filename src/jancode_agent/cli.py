@@ -75,6 +75,7 @@ async def _run_once(agent: Agent, prompt: str, verbose: bool) -> int:
 
     exit_code = 0
     last_usage = None
+    cli_streaming = False  # 正在连续打印流式分片
     async for step in agent.run(prompt):
         if step.kind == "usage" and step.usage:
             last_usage = step.usage  # 回合结束打摘要用
@@ -99,8 +100,23 @@ async def _run_once(agent: Agent, prompt: str, verbose: bool) -> int:
                 # 子智能体的结论会作为工具结果回流给主智能体，这里只提示一句。
                 # 直接打印会和主智能体的最终答复混淆——用户分不清哪个是结论。
                 print(f"{indent}✓ 子智能体「{step.subagent}」已给出结论")
-            else:
-                print(f"\n{step.text}\n")
+            elif step.delta or cli_streaming:
+                # 流式分片：连着打，不换行。按整段打印的话每片都夹两个
+                # 空行，回答碎成一列还没法读。收尾标记（text 为空，不
+                # 管带不带 delta）负责补一个换行结束这轮回答。首片前
+                # 先空一行，与整段路径的版式一致。
+                if step.text:
+                    if not cli_streaming:
+                        print(flush=True)
+                        cli_streaming = True
+                    print(step.text, end="", flush=True)
+                elif cli_streaming:
+                    print(flush=True)
+                    cli_streaming = False
+            elif step.text:
+                # print 自带换行；先前 f-string 里多写的 \n 会让非流式回答
+                # 比流式多出一个空行，统一成前后各一行的版式。
+                print(f"\n{step.text}", flush=True)
         elif step.kind == "error":
             who = f"子智能体「{step.subagent}」：" if step.subagent else ""
             print(f"\n⚠ {who}{step.text}\n", file=sys.stderr)
