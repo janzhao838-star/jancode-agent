@@ -1876,35 +1876,51 @@ main,.main,#main{overflow:hidden}
 </script>
 
 <script>
-/* 速度／推理强度选择框：放在模型选择旁边。
-   请求体由原来的发送逻辑组装，这里不改它——用包装 fetch 的方式
-   在 /api/run 的请求体里补一个 effort 字段，改动面最小。 */
+/* 速度／推理强度：档位跟着模型走。
+   中转站的模型清单里没有能力字段，所以档位由后端按模型家族判断后下发；
+   模型不支持调节时，这个选择器直接隐藏，请求里也不带该字段
+   （硬塞给不支持的模型会被 provider 拒绝）。 */
 (function(){
-  var LEVELS=[["","默认速度"],["low","快速"],["medium","均衡"],["high","深度思考"]];
-  function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
+  var LABEL={low:'快速',medium:'均衡',high:'深度思考'};
+  var efforts={}, current='';
+  function currentModel(){
+    var btn=document.getElementById('modelBtn')||document.getElementById('mpick');
+    if(!btn)return '';
+    return (btn.textContent||'').trim().replace(/[▾\u25be\s]+$/,'').trim();
+  }
+  function rebuild(){
+    var sel=document.getElementById('mg-effort');
+    if(!sel)return;
+    var m=currentModel();
+    var levels=efforts[m]||[];
+    if(m===current&&sel.dataset.built===levels.join(','))return;
+    current=m;sel.dataset.built=levels.join(',');
+    sel.innerHTML='';
+    if(!levels.length){sel.style.display='none';sel.value='';return;}
+    sel.style.display='';
+    var o=document.createElement('option');o.value='';o.textContent='默认速度';sel.appendChild(o);
+    levels.forEach(function(l){var x=document.createElement('option');x.value=l;x.textContent=LABEL[l]||l;sel.appendChild(x);});
+  }
   function inject(){
     var btn=document.getElementById('modelBtn')||document.getElementById('mpick');
     if(!btn||document.getElementById('mg-effort'))return;
     var sel=document.createElement('select');
-    sel.id='mg-effort';sel.title='推理强度：越深越慢但更准';
-    sel.style.cssText='height:32px;border:1px solid #ececf1;border-radius:8px;padding:0 8px;font-size:12.5px;background:#fff;color:#4b5563;margin-left:8px;cursor:pointer';
-    LEVELS.forEach(function(p){var o=el('option',null,p[1]);o.value=p[0];sel.appendChild(o);});
+    sel.id='mg-effort';sel.title='推理强度：越深越慢但更准；档位由模型决定';
+    sel.style.cssText='height:32px;border:1px solid #ececf1;border-radius:8px;padding:0 8px;font-size:12.5px;background:#fff;color:#4b5563;margin-left:8px;cursor:pointer;display:none';
     btn.parentNode.insertBefore(sel,btn.nextSibling);
+    fetch('/api/models').then(function(r){return r.json();}).then(function(d){efforts=d.efforts||{};rebuild();});
   }
   var orig=window.fetch;
   window.fetch=function(url,opts){
     try{
       if(String(url).indexOf('/api/run')>=0&&opts&&typeof opts.body==='string'){
         var sel=document.getElementById('mg-effort');
-        if(sel&&sel.value){
-          var b=JSON.parse(opts.body);b.effort=sel.value;
-          opts=Object.assign({},opts,{body:JSON.stringify(b)});
-        }
+        if(sel&&sel.value){var b=JSON.parse(opts.body);b.effort=sel.value;opts=Object.assign({},opts,{body:JSON.stringify(b)});}
       }
     }catch(e){}
     return orig.call(this,url,opts);
   };
-  setInterval(function(){try{inject();}catch(e){}},900);
+  setInterval(function(){try{inject();rebuild();}catch(e){}},700);
 })();
 </script>
 </body>

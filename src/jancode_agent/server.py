@@ -619,7 +619,14 @@ class Handler(BaseHTTPRequestHandler):
         seen = set()
         ids = [x for x in ids if not (x in seen or seen.add(x))]
 
-        self._json({"ok": True, "models": ids, "current": p.model, "error": error})
+        # 每个模型支持哪些推理档位，一并给界面：不支持的就别显示选择器。
+        from .efforts import options_for
+
+        levels = {mid: options_for(mid) for mid in ids}
+        if p.model:
+            levels[p.model] = options_for(p.model)
+
+        self._json({"efforts": levels, "ok": True, "models": ids, "current": p.model, "error": error})
 
     def _json(self, payload: dict, code: int = 200) -> None:
         self._send(code, json.dumps(payload, ensure_ascii=False).encode(), "application/json")
