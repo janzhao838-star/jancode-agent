@@ -74,7 +74,10 @@ async def _run_once(agent: Agent, prompt: str, verbose: bool) -> int:
     from .agent import Step
 
     exit_code = 0
+    last_usage = None
     async for step in agent.run(prompt):
+        if step.kind == "usage" and step.usage:
+            last_usage = step.usage  # 回合结束打摘要用
         # 子智能体的步骤缩进一层。不做区分的话，主智能体和子智能体的工具调用
         # 会混在同一个缩进级别上，看不出到底是谁在干活。
         indent = "    " if step.subagent else "  "
@@ -105,6 +108,12 @@ async def _run_once(agent: Agent, prompt: str, verbose: bool) -> int:
             # 主智能体还有机会自己接手或换个思路。
             if not step.subagent:
                 exit_code = 1
+    # 网关不回 usage 时全是 0，打一行 0 tok 是噪音——只在有真数据时打印。
+    if last_usage and (last_usage.get("prompt_tokens") or last_usage.get("completion_tokens")):
+        total = last_usage.get("prompt_tokens", 0) + last_usage.get("completion_tokens", 0)
+        cached = last_usage.get("cached_tokens", 0)
+        hit = f" · 缓存命中 {round(cached / last_usage['prompt_tokens'] * 100)}%" if last_usage.get("prompt_tokens") else ""
+        print(f"—— {last_usage['turns']} 轮 {last_usage['steps']} 步 · {total} tok{hit}", flush=True)
     return exit_code
 
 

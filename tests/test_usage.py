@@ -169,3 +169,63 @@ def test_usage帧在finish_reason之后也能收到():
     u = [e for e in events if e["type"] == "usage"]
     kinds = [e["type"] for e in events]
     assert u and u[0]["usage"]["prompt_tokens"] == 7, kinds
+
+def test_cli一次性运行结束打印用量摘要(tmp_path, capsys):
+    """CLI 用户也该看到 token 消耗——界面有统计行，终端不能没有。"""
+    import asyncio
+    from jancode_agent.cli import _run_once
+    from jancode_agent.config import AgentConfig, ProviderConfig
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def complete(self, messages, tools=None):
+            return Reply(content="答案", usage={"prompt_tokens": 100,
+                "completion_tokens": 20, "prompt_tokens_details": {"cached_tokens": 50}})
+
+    cfg = AgentConfig(
+        provider=ProviderConfig(name="t", base_url="http://x", model="m", api_key="k"),
+        workspace=tmp_path, max_steps=4,
+    )
+    agent = Agent(cfg, client=FakeClient())
+
+    async def go():
+        async with agent:
+            return await _run_once(agent, "问", verbose=False)
+
+    code = asyncio.run(go())
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "1 轮 0 步" in out and "120 tok" in out, out
+    assert "缓存命中 50%" in out, out
+
+
+def test_cli无usage时安静收场(tmp_path, capsys):
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def complete(self, messages, tools=None):
+            return Reply(content="答案")
+
+    from jancode_agent.cli import _run_once
+    cfg = AgentConfig(
+        provider=ProviderConfig(name="t", base_url="http://x", model="m", api_key="k"),
+        workspace=tmp_path, max_steps=4,
+    )
+    agent = Agent(cfg, client=FakeClient())
+
+    async def go():
+        async with agent:
+            return await _run_once(agent, "问", verbose=False)
+
+    code = asyncio.run(go())
+    out = capsys.readouterr().out
+    assert code == 0 and "——" not in out, out
