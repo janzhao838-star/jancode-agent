@@ -68,6 +68,27 @@ def slug(text: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "_", str(text or ""))
 
 
+
+def spawn_command(command: str, args: list | None = None,
+                  plat: str | None = None, which=None) -> list:
+    """把要执行的命令拼成 Popen 能直接用的参数列表。
+
+    Windows 上 npx / npm 是 .cmd 批处理文件，CreateProcess 不能直接执行，
+    会报「不是有效的 Win32 应用程序」，所以要用 cmd /c 包一层。
+
+    单独抽成函数是为了能测：真机验证 Windows 需要一台 Windows 机器，
+    但「拼出来的命令对不对」用假平台参数就能查出来。
+    """
+    plat = plat if plat is not None else os.name
+    which = which or shutil.which
+    rest = list(args or [])
+    if plat != "nt":
+        return [command, *rest]
+    found = (which(command) or "").lower()
+    if found.endswith((".cmd", ".bat")) or command in ("npx", "npm", "pnpm"):
+        return ["cmd", "/c", command, *rest]
+    return [command, *rest]
+
 class MCPError(RuntimeError):
     pass
 
@@ -95,18 +116,11 @@ class MCPClient:
         env = dict(os.environ)
         env.update(self.env)
 
-        # Windows 上 npx / npm 是 .cmd 批处理文件，CreateProcess 不能直接执行，
-        # 会报「不是有效的 Win32 应用程序」。必须用 cmd /c 包一层。
-        command, args = self.command, list(self.args)
-        if os.name == "nt":
-            found = (shutil.which(command) or "").lower()
-            if found.endswith((".cmd", ".bat")) or command in ("npx", "npm", "pnpm"):
-                args = ["/c", command] + args
-                command = "cmd"
+        argv = spawn_command(self.command, self.args)
 
         try:
             self.proc = subprocess.Popen(
-                [command, *args],
+                argv,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, text=True, bufsize=1, env=env)
         except FileNotFoundError as exc:

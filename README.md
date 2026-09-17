@@ -265,9 +265,11 @@ jancode --no-subagents "你的任务"
 六个页面全部通过——每次都恰好一个页面处于显示状态且就是目标页，
 且该页内容标志物出现。）
 
-- **Windows 侧从未在真机上跑过**。`npx.cmd` 的启动修复（Windows 上要
-  通过 `cmd /c` 调 npx）只在代码层面完成。需要一台 Windows 机器跑一遍：
-  安装、双击启动、MCP 服务启动、打包出的 `.exe` 能起来。
+- **Windows 侧从未在真机上跑过**。命令拼装那一层已经用单元测试验过
+  （`tests/test_windows_spawn.py`：win32 下 npx / npm / pnpm，以及解析到 `.cmd` 的
+  路径，都会包成 `cmd /c …`；真正的 `.exe` 不包）——
+  但真机运行时仍未验证。需要一台 Windows 机器跑一遍：安装、双击启动、
+  MCP 服务启动、打包出的 `.exe` 能起来。
 
 ## 测试
 
