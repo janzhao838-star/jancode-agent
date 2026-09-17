@@ -188,6 +188,10 @@ def load_config(
                 provider = replace(provider, **{fld: provider_table[fld]})
         if provider_table.get("timeout"):
             provider = replace(provider, timeout=float(provider_table["timeout"]))
+        # effort 也属于供应商接入参数，漏读的话配置文件里写了也不生效
+        # （Web 端能设档位，命令行/TOML 用户却设不了）。
+        if provider_table.get("effort"):
+            provider = replace(provider, effort=str(provider_table["effort"]))
         if provider_table.get("temperature") is not None:
             provider = replace(provider, temperature=float(provider_table["temperature"]))
     else:
@@ -208,6 +212,7 @@ def load_config(
             api_key=provider_table.get("api_key", ""),
             label=provider_table.get("label", name),
             wire_api=provider_table.get("wire_api", "chat"),
+            effort=str(provider_table.get("effort", "")),
             timeout=float(provider_table.get("timeout", 300.0)),
             temperature=float(provider_table.get("temperature", 0.2)),
         )
@@ -220,6 +225,10 @@ def load_config(
         max_steps=int(agent_table.get("max_steps", 40)),
         max_tool_output=int(agent_table.get("max_tool_output", 20_000)),
         allow_bash=bool(agent_table.get("allow_bash", True)),
+        # mode 与 system_extra 以前只在 Web 端由界面写入，
+        # 配置文件里写了同样被静默丢弃——一并接上。
+        mode=str(agent_table.get("mode", "auto")),
+        system_extra=str(agent_table.get("system_extra", "")),
         bash_timeout=float(agent_table.get("bash_timeout", 120.0)),
         workspace=Path(workspace) if workspace else Path.cwd(),
         allow_subagents=bool(agent_table.get("allow_subagents", True)),
