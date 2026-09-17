@@ -1173,7 +1173,9 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
 <style>
 /* 技能页要能滚：之前容器没有滚动条，32 张卡片只露出前 6 张，
    用户看到的就是「只有几个技能，还滚不动」。 */
-#view-skills{overflow-y:auto!important;overflow-x:hidden!important;height:100%!important;max-height:100%!important;display:block!important;flex:1 1 auto!important;min-height:0!important}
+/* 不能写 display/height 这类强制值：应用切页面靠的是隐藏非当前视图，
+   我强制 display:block 之后技能页永远显示，点别的也还是技能页。 */
+#view-skills{overflow-y:auto!important;overflow-x:hidden!important;min-height:0!important}
 #view-skills>*{flex:none!important}
 #mg-skills{padding:22px 26px 60px!important}
 #mg-grid{padding-bottom:40px}

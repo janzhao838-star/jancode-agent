@@ -291,6 +291,22 @@ class Handler(BaseHTTPRequestHandler):
                      [str(s) for s in picked] if isinstance(picked, list) else [])
         self._json({"ok": True})
 
+    def _sync_active_provider(self) -> None:
+        """把界面里那次保存同步进当前选中的那套接入配置。
+
+        多套配置存在时平铺字段不再被读取，不同步的话用户会以为改完生效了。
+        """
+        items, active = load_providers()
+        row = next((i for i in items if i["name"] == active), None)
+        if row is None:
+            return
+        cfg = Handler.config.provider
+        row["base_url"] = cfg.base_url or row["base_url"]
+        row["model"] = cfg.model or row["model"]
+        if cfg.api_key:
+            row["api_key"] = cfg.api_key
+        save_providers(items, active)
+
     def _edit_provider(self) -> None:
         """增删改和切换接入配置。"""
         payload = self._body()
@@ -462,6 +478,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # 立刻生效：不然用户填完还得重启一次 app，很容易以为没保存上。
         Handler.config = apply_saved_settings(Handler.config)
+        self._sync_active_provider()
         self._json({"ok": True, "has_key": bool(Handler.config.provider.api_key),
                     "model": Handler.config.provider.model,
                     "base_url": Handler.config.provider.base_url})
