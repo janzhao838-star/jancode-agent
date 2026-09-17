@@ -19,7 +19,7 @@ DEFAULT_CONFIG_PATH = Path.home() / ".jancode-agent" / "config.toml"
 
 # 国内常见中转站与厂商的默认入口，供 --provider 快速切换。
 BUILTIN_PROVIDERS: dict[str, dict[str, str]] = {
-    "aionclaw": {
+    "janzhao": {
         "base_url": "https://router.aionclaw.com/v1",
         "model": "deepseek-v4-pro",
         "label": "钧子AI",
@@ -172,7 +172,7 @@ def load_config(
             raw = tomllib.load(fh)
 
     provider_table = raw.get("provider", {})
-    name = provider_name or provider_table.get("name") or "aionclaw"
+    name = provider_name or provider_table.get("name") or "janzhao"
 
     if name in BUILTIN_PROVIDERS:
         provider = _provider_from_name(name, api_key=provider_table.get("api_key", ""))

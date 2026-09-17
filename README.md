@@ -142,7 +142,7 @@ jancode-agent --doctor
 
 | 名称 | 说明 |
 |---|---|
-| `aionclaw` | AionClaw 中转站 |
+| `janzhao` | 钧子AI 中转站 |
 | `janzhao` | janzhao 自建网关 |
 | `junzi` | 钧子AI 中转站 |
 | `deepseek` | DeepSeek 官方 |
@@ -159,7 +159,7 @@ jancode-agent --doctor
 
 ```toml
 [provider]
-name = "aionclaw"
+name = "janzhao"
 api_key = "sk-..."       # 也可以改用环境变量，更安全
 model = "deepseek-v4-pro"
 wire_api = "chat"        # 或 responses
@@ -246,7 +246,7 @@ jancode --no-subagents "你的任务"
 返回 401：{"error":{"code":"","message":"Invalid token...","type":"new_api_error"}}
 ```
 
-说明协议路径正确（401 而非 404）、错误能原样透出。AionClaw 与钧子AI
+说明协议路径正确（401 而非 404）、错误能原样透出。钧子AI
 同用 New API 引擎。
 
 ## 测试
