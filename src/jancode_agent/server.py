@@ -370,6 +370,27 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "mode": preset["mode"], "name": preset["name"]})
 
 
+    def _apply_settings_to_active(self, saved: dict) -> None:
+        """把本次提交的连接设置写进 active 那套接入配置。
+
+        _sync_active_provider 是从当前 config 抄回存档，用来记住正在用的；
+        这里是用户刚填的新值，必须以提交为准，否则第二次保存会被
+        providers 数组里的旧值盖掉（apply_saved_settings 优先读数组）。
+        """
+        items, active = load_providers()
+        row = next((i for i in items if i["name"] == active), None)
+        if row is None:
+            items = [{"name": "默认", "base_url": str(saved.get("base_url") or "")
+                      + "", "api_key": str(saved.get("api_key") or "")
+                      + "", "model": str(saved.get("model") or "")}]
+            active = "默认"
+        else:
+            for key in ("api_key", "base_url", "model"):
+                value = str(saved.get(key) or "").strip()
+                if value:
+                    row[key] = value
+        save_providers(items, active)
+
     def _sync_active_provider(self) -> None:
         """把界面里那次保存同步进当前选中的那套接入配置。
 
@@ -612,8 +633,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # 立刻生效：不然用户填完还得重启一次 app，很容易以为没保存上。
+        # 顺序很关键：先把本次提交的新值写进 active 那套接入配置，再套到进程。
+        # 反过来的话 apply 读到的还是 providers 数组里的旧值——第二次保存
+        # 会被第一次保存的值盖掉，表现为「改了没反应」。
+        self._apply_settings_to_active(saved)
         Handler.config = apply_saved_settings(Handler.config)
-        self._sync_active_provider()
         self._json({"ok": True, "has_key": bool(Handler.config.provider.api_key),
                     "model": Handler.config.provider.model,
                     "base_url": Handler.config.provider.base_url})
