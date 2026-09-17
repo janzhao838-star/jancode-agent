@@ -273,6 +273,7 @@ class Client:
         pending: dict[int, dict[str, str]] = {}
         raw_lines: list[str] = []
         produced = False
+        finished = False
 
         async with self._http.stream(
             "POST", url, headers=self._headers(), json=payload
@@ -323,6 +324,15 @@ class Client:
                             slot["name"] = fn["name"]
                         if fn.get("arguments"):
                             slot["arguments"] += fn["arguments"]
+
+                    # 模型用 finish_reason 明确说了「我说完了」。
+                    # 不能等 [DONE] 或等连接关闭：实测网关会把 SSE 连接
+                    # 多挂 9 秒才关，用户在文字吐完后又白等 9 秒。
+                    if choice.get("finish_reason"):
+                        finished = True
+
+                if finished:
+                    break
 
             if pending:
                 produced = True
