@@ -17,7 +17,7 @@ import os
 import threading
 import time
 import webbrowser
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -42,27 +42,99 @@ def _saved_settings() -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def apply_saved_settings(config: AgentConfig) -> AgentConfig:
-    """把界面里保存过的设置补进配置。
+PROVIDERS_KEY = "providers"
+ACTIVE_KEY = "active_provider"
 
-    双击启动的 app 没有终端，也就没有环境变量。不读这份文件的话，
-    用户每次打开都只看到「未提供 API 密钥」，而且界面上没有任何地方能填。
 
-    环境变量优先：命令行用户明确设了，就该按他说的来，不能被界面里的旧值盖掉。
+def load_providers() -> tuple[list[dict], str]:
+    """读出所有接入配置和当前选中的那套。
+
+    每个客户用的中转站和模型都不一样，只存一套等于每次换客户都要改文件。
+    兼容早期只有 base_url/api_key/model 平铺字段的存档：把它当成唯一一套，
+    老用户升级后配置不丢。
     """
-    from dataclasses import replace
-
     saved = _saved_settings()
-    if not saved:
-        return config
+    raw = saved.get(PROVIDERS_KEY)
+    if not isinstance(raw, list) or not raw:
+        legacy = {}
+        for field in ("base_url", "api_key", "model", "wire_api"):
+            value = saved.get(field)
+            if value:
+                legacy[field] = value
+        if legacy:
+            legacy["name"] = "默认"
+            return [legacy], "默认"
+        return [], ""
+    items = []
+    for row in raw:
+        if not isinstance(row, dict) or not str(row.get("name") or "").strip():
+            continue
+        items.append({
+            "name": str(row.get("name")).strip(),
+            "base_url": str(row.get("base_url") or ""),
+            "api_key": str(row.get("api_key") or ""),
+            "model": str(row.get("model") or ""),
+            "wire_api": str(row.get("wire_api") or "chat"),
+        })
+    active = str(saved.get(ACTIVE_KEY) or "").strip()
+    if active not in {i["name"] for i in items}:
+        active = items[0]["name"] if items else ""
+    return items, active
+
+
+def save_providers(items: list[dict], active: str) -> None:
+    payload = dict(_saved_settings())
+    payload[PROVIDERS_KEY] = items
+    payload[ACTIVE_KEY] = active
+    for row in items:
+        if row["name"] == active:
+            payload["base_url"] = row["base_url"]
+            payload["api_key"] = row["api_key"]
+            payload["model"] = row["model"]
+            payload["wire_api"] = row.get("wire_api", "chat")
+    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SETTINGS_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=1),
+                             encoding="utf-8")
+    try:
+        os.chmod(SETTINGS_PATH, 0o600)
+    except OSError:
+        pass
+
+
+def provider_config(config: AgentConfig, row: dict) -> AgentConfig:
+    """把一套接入配置套到 config 上。"""
     provider = config.provider
-    if not os.environ.get("JANCODE_API_KEY") and saved.get("api_key"):
-        provider = replace(provider, api_key=str(saved["api_key"]))
-    if not os.environ.get("JANCODE_BASE_URL") and saved.get("base_url"):
-        provider = replace(provider, base_url=str(saved["base_url"]).rstrip("/"))
-    if not os.environ.get("JANCODE_MODEL") and saved.get("model"):
-        provider = replace(provider, model=str(saved["model"]))
+    if row.get("base_url"):
+        provider = replace(provider, base_url=row["base_url"])
+    if row.get("api_key"):
+        provider = replace(provider, api_key=row["api_key"])
+    if row.get("model"):
+        provider = replace(provider, model=row["model"])
+    if row.get("wire_api"):
+        provider = replace(provider, wire_api=row["wire_api"])
     return replace(config, provider=provider)
+
+
+def apply_saved_settings(config: AgentConfig) -> AgentConfig:
+    """把界面里保存的接入配置套到 config 上。
+
+    环境变量优先：脚本和 CI 里临时指定接入方式很常见，
+    被一个界面存档盖掉会让人完全摸不着头脑。
+    """
+    items, active = load_providers()
+    row = next((i for i in items if i["name"] == active), None)
+    if row is None:
+        return config
+    patched = provider_config(config, row)
+    provider = patched.provider
+    for names, attr in (
+        (("JANCODE_API_KEY", "OPENAI_API_KEY"), "api_key"),
+        (("JANCODE_BASE_URL", "OPENAI_BASE_URL"), "base_url"),
+        (("JANCODE_MODEL", "OPENAI_MODEL"), "model"),
+    ):
+        if any(os.environ.get(n, "").strip() for n in names):
+            provider = replace(provider, **{attr: getattr(config.provider, attr)})
+    return replace(patched, provider=provider)
 
 
 def _index_html() -> bytes:
@@ -104,6 +176,13 @@ class Handler(BaseHTTPRequestHandler):
                 "version": __version__,
             }
             self._send(200, json.dumps(payload, ensure_ascii=False).encode(), "application/json")
+            return
+        if self.path.startswith("/api/providers"):
+            items, active = load_providers()
+            self._json({"ok": True, "active": active, "providers": [
+                {**{k: v for k, v in row.items() if k != "api_key"},
+                 "has_key": bool(row.get("api_key")),
+                 "is_active": row["name"] == active} for row in items]})
             return
         if self.path == "/api/models":
             self._models()
@@ -211,6 +290,58 @@ class Handler(BaseHTTPRequestHandler):
                      str(payload.get("model") or ""),
                      [str(s) for s in picked] if isinstance(picked, list) else [])
         self._json({"ok": True})
+
+    def _edit_provider(self) -> None:
+        """增删改和切换接入配置。"""
+        payload = self._body()
+        action = str(payload.get("action") or "save").strip()
+        name = str(payload.get("name") or "").strip()
+        items, active = load_providers()
+
+        if action == "delete":
+            items = [i for i in items if i["name"] != name]
+            if active == name:
+                active = items[0]["name"] if items else ""
+            save_providers(items, active)
+            self._apply_active(items, active)
+            self._json({"ok": True})
+            return
+
+        if action == "activate":
+            if name not in {i["name"] for i in items}:
+                self._json({"ok": False, "error": "没有这套接入配置"})
+                return
+            save_providers(items, name)
+            self._apply_active(items, name)
+            self._json({"ok": True, "active": name})
+            return
+
+        if not name:
+            self._json({"ok": False, "error": "给这套配置起个名字"})
+            return
+        row = next((i for i in items if i["name"] == name), None)
+        if row is None:
+            row = {"name": name, "base_url": "", "api_key": "", "model": "",
+                   "wire_api": "chat"}
+            items.append(row)
+        for field in ("base_url", "model", "wire_api"):
+            if payload.get(field) is not None:
+                row[field] = str(payload.get(field) or "")
+        # 密钥留空表示「不改」：每次改模型都要重输一遍密钥太折磨人
+        if str(payload.get("api_key") or "").strip():
+            row["api_key"] = str(payload["api_key"]).strip()
+        if payload.get("activate", True):
+            active = name
+        save_providers(items, active)
+        self._apply_active(items, active)
+        self._json({"ok": True, "active": active})
+
+    def _apply_active(self, items: list[dict], active: str) -> None:
+        row = next((i for i in items if i["name"] == active), None)
+        if row is None:
+            return
+        base = Handler.config
+        Handler.config = replace(base, provider=provider_config(base, row).provider)
 
     def _edit_automation(self) -> None:
         from .library import delete_automation, upsert_automation
@@ -426,6 +557,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if self.path == "/api/notify":
             self._notify()
+            return
+        if self.path == "/api/providers":
+            self._edit_provider()
             return
         if self.path == "/api/settings":
             self._save_settings()
