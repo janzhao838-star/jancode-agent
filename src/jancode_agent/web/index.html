@@ -1187,6 +1187,259 @@ main,.main,#main{overflow:hidden}
    :has() 那一条是保险：万一自建块被包在某个容器里，别把它一起藏了。 */
 #view-skills>*:not(#mg-skills):not(:has(#mg-skills)){display:none!important}
 </style>
+
+<script>
+/* 厂商选择：不让用户手输地址和模型名。
+   选一个厂商就自动填好接口地址，并把它的模型列表挂到模型输入框上。 */
+(function(){
+  function h(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
+  var loaded=false;
+  function build(){
+    try{
+      var base=document.getElementById('setBase');
+      var model=document.getElementById('setModel');
+      var mask=document.getElementById('mask');
+      if(!base||!model||!mask||document.getElementById('mgVendor'))return;
+      var box=h('div');box.id='mgVendor';box.style.cssText='margin:10px 0 2px';
+      var lab=h('div','','选厂商（自动填地址和模型）');
+      lab.style.cssText='font-size:12.5px;color:#6b7280;margin-bottom:6px';
+      box.appendChild(lab);
+      var sel=document.createElement('select');
+      sel.style.cssText='width:100%;height:38px;border:1px solid #ececf1;border-radius:9px;padding:0 10px;background:#fff;font-size:13.5px';
+      sel.appendChild(h('option',null,'— 请选择 —'));
+      box.appendChild(sel);
+      var hint=h('div','','');
+      hint.style.cssText='font-size:12px;color:#9aa1ab;margin-top:6px';
+      box.appendChild(hint);
+      // 挂在「接口地址」标题上方
+      var label=base.previousElementSibling;
+      if(label&&label.parentNode)label.parentNode.insertBefore(box,label);
+      else base.parentNode.insertBefore(box,base);
+      var dl=document.createElement('datalist');dl.id='mgModels';
+      document.body.appendChild(dl);
+      model.setAttribute('list','mgModels');
+      fetch('/api/vendors').then(function(r){return r.json();}).then(function(d){
+        (d.vendors||[]).forEach(function(v){
+          var o=h('option',null,v.vendor);
+          o.value=v.vendor;sel.appendChild(o);
+        });
+        sel.onchange=function(){
+          var v=(d.vendors||[]).filter(function(x){return x.vendor===sel.value;})[0];
+          if(!v)return;
+          base.value=v.base_url;
+          dl.innerHTML='';
+          v.models.forEach(function(m){var o=document.createElement('option');o.value=m;dl.appendChild(o);});
+          if(v.models.length)model.value=v.models[0];
+          hint.textContent=v.note+'（模型可改，点右边箭头选）';
+        };
+      }).catch(function(){});
+      loaded=true;
+    }catch(e){}
+  }
+  setInterval(build,1000);
+})();
+</script>
+
+<style>
+#mg-prov{padding:20px 24px 60px}
+#mg-prov .mg-card2{display:flex;align-items:center;gap:12px;padding:16px 18px;background:#fff;border:1px solid #ececf1;border-radius:12px;margin-bottom:12px}
+#mg-prov .mg-nm{font-size:15px;font-weight:600;flex:1;min-width:0}
+#mg-prov .mg-badge{font-size:11.5px;color:#6b7280;border:1px solid #ececf1;border-radius:5px;padding:1px 6px}
+#mg-prov .mg-dot{width:8px;height:8px;border-radius:99px;display:inline-block}
+#mg-prov .mg-abtn{height:30px;padding:0 13px;border-radius:8px;border:1px solid #e3e3e8;background:#fff;font-size:13px;cursor:pointer;color:#4b5563}
+#mg-prov .mg-abtn:hover{border-color:#c9b8ff;color:#5b3ee8}
+#mg-prov .mg-del{color:#dc2626;border-color:#f3d3d3}
+#mg-prov .mg-add{flex:1;height:52px;border:1px dashed #d9d9e3;border-radius:12px;background:#fff;font-size:14px;color:#4b5563;cursor:pointer}
+#mg-prov .mg-add:hover{border-color:#c9b8ff;color:#5b3ee8}
+#mg-prov input,#mg-prov select{height:38px;border:1px solid #ececf1;border-radius:9px;padding:0 11px;font-size:13.5px;background:#fff}
+#view-models{overflow-y:auto!important;min-height:0!important}
+#view-models>*:not(#mg-prov):not(:has(#mg-prov)){display:none!important}
+</style>
+<script>
+/* 模型接入页：自己造整页，不碰原有 DOM。
+   参照 DSH 的设置-模型页：提供商列表 + 状态点 + 编辑/删除 + 添加。 */
+(function(){
+  function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
+  function api(path,body){
+    return fetch(path,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})
+      .then(function(r){return r.json();});
+  }
+  var vendors=[], editing='';
+  function form(box){
+    var f=el('div');f.id='mg-form';
+    f.style.cssText='display:none;background:#fff;border:1px solid #ececf1;border-radius:12px;padding:16px 18px;margin-bottom:14px';
+    var row1=el('div');row1.style.cssText='display:flex;gap:10px;margin-bottom:10px;align-items:center';
+    var sel=el('select');sel.id='mg-vsel';sel.style.flex='1';
+    sel.appendChild(el('option',null,'选择厂商（自动填地址和模型）'));
+    vendors.forEach(function(v){var o=el('option',null,v.vendor);o.value=v.vendor;sel.appendChild(o);});
+    row1.appendChild(sel);
+    f.appendChild(row1);
+    [['mg-name','这套配置的名字'],['mg-base','接口地址，如 https://xxx/v1'],['mg-key','API 密钥'],['mg-model','模型名']].forEach(function(pair){
+      var i=el('input');i.id=pair[0];i.placeholder=pair[1];
+      i.style.cssText='width:100%;margin-bottom:10px';
+      f.appendChild(i);
+    });
+    var hint=el('div','','');hint.id='mg-vhint';
+    hint.style.cssText='font-size:12px;color:#9aa1ab;margin-bottom:10px';
+    f.appendChild(hint);
+    var bar=el('div');bar.style.cssText='display:flex;gap:10px';
+    var save=el('button','mg-abtn','保存并启用');save.id='mg-save';
+    save.style.cssText='height:34px;padding:0 16px;background:linear-gradient(135deg,#7c5cff,#35c3e8);color:#fff;border:none;border-radius:9px;font-size:13.5px;cursor:pointer';
+    var cancel=el('button','mg-abtn','取消');
+    bar.appendChild(save);bar.appendChild(cancel);f.appendChild(bar);
+    sel.onchange=function(){
+      var v=vendors.filter(function(x){return x.vendor===sel.value;})[0];
+      if(!v)return;
+      f.querySelector('#mg-base').value=v.base_url;
+      if(v.models.length)f.querySelector('#mg-model').value=v.models[0];
+      hint.textContent=v.note;
+      if(!f.querySelector('#mg-name').value)f.querySelector('#mg-name').value=v.vendor;
+    };
+    cancel.onclick=function(){f.style.display='none';};
+    save.onclick=function(){
+      var body={name:f.querySelector('#mg-name').value.trim(),
+                base_url:f.querySelector('#mg-base').value.trim(),
+                model:f.querySelector('#mg-model').value.trim(),
+                api_key:f.querySelector('#mg-key').value.trim(),
+                activate:true};
+      if(!body.name){hint.textContent='给这套配置起个名字';return;}
+      hint.textContent='保存中…';
+      api('/api/providers',body).then(function(d){
+        if(!d.ok){hint.textContent='失败：'+(d.error||'未知');return;}
+        f.style.display='none';f.querySelector('#mg-key').value='';load();
+      }).catch(function(){hint.textContent='连不上本地服务';});
+    };
+    return f;
+  }
+  function render(d){
+    var view=document.getElementById('view-models');
+    if(!view)return;
+    var box=document.getElementById('mg-prov');
+    if(!box){box=el('div');box.id='mg-prov';view.appendChild(box);}
+    var keep=box.querySelector('#mg-form');
+    box.innerHTML='';
+    var title=el('div','','模型接入');
+    title.style.cssText='font-size:19px;font-weight:650;margin-bottom:4px';
+    box.appendChild(title);
+    var sub=el('div','','填好密钥即可使用。点「添加提供方」从国内厂商和你的 DGX 里选，自动填地址和模型。');
+    sub.style.cssText='font-size:13px;color:#6b7280;margin-bottom:16px';
+    box.appendChild(sub);
+    var f=keep||form(box); f.style.display='none';
+    box.appendChild(f);
+    (d.providers||[]).forEach(function(p){
+      var c=el('div','mg-card2');
+      c.appendChild(el('span','mg-nm',p.name));
+      if(p.is_active)c.appendChild(el('span','mg-badge','当前使用'));
+      var dot=el('span','mg-dot');dot.style.background=p.has_key?'#16a34a':'#dc2626';
+      c.appendChild(dot);
+      var meta=el('span','','');meta.style.cssText='font-size:12.5px;color:#9aa1ab';
+      meta.textContent=p.model+' · '+p.base_url.replace(/^https?:\/\//,'').slice(0,42);
+      c.appendChild(meta);
+      var edit=el('button','mg-abtn','编辑');
+      edit.onclick=function(){
+        f.style.display='block';
+        f.querySelector('#mg-name').value=p.name;
+        f.querySelector('#mg-base').value=p.base_url;
+        f.querySelector('#mg-model').value=p.model;
+        f.querySelector('#mg-key').value='';
+        f.querySelector('#mg-key').placeholder='留空表示不改密钥';
+        f.querySelector('#mg-vhint').textContent='密钥留空即不修改';
+      };
+      c.appendChild(edit);
+      if(!p.is_active){
+        var act=el('button','mg-abtn','启用');
+        act.onclick=function(){api('/api/providers',{action:'activate',name:p.name}).then(load);};
+        c.appendChild(act);
+      }
+      var del=el('button','mg-abtn mg-del','删除');
+      del.onclick=function(){api('/api/providers',{action:'delete',name:p.name}).then(load);};
+      c.appendChild(del);
+      box.appendChild(c);
+    });
+    if(!(d.providers||[]).length){
+      var empty=el('div','','还没有接入配置。点下面的按钮添加一个。');
+      empty.style.cssText='font-size:13.5px;color:#6b7280;padding:16px 0';
+      box.appendChild(empty);
+    }
+    var bar=el('div');bar.style.cssText='display:flex;gap:12px;margin-top:6px';
+    var addBtn=el('button','mg-add','＋ 添加提供方');
+    addBtn.onclick=function(){f.style.display='block';f.querySelector('#mg-key').placeholder='API 密钥';f.querySelector('#mg-name').value='';f.querySelector('#mg-base').value='';f.querySelector('#mg-model').value='';f.querySelector('#mg-vhint').textContent='';};
+    var addCustom=el('button','mg-add','＋ 添加自定义提供方');
+    addCustom.onclick=function(){f.style.display='block';f.querySelector('#mg-vhint').textContent='填任意兼容 OpenAI 协议的地址';};
+    bar.appendChild(addBtn);bar.appendChild(addCustom);
+    box.appendChild(bar);
+  }
+  function load(){
+    fetch('/api/providers').then(function(r){return r.json();}).then(render).catch(function(){});
+  }
+  fetch('/api/vendors').then(function(r){return r.json();}).then(function(d){
+    vendors=d.vendors||[];load();
+  }).catch(function(){load();});
+  setInterval(function(){
+    try{
+      var v=document.getElementById('view-models');
+      if(v&&v.offsetHeight>0&&!document.getElementById('mg-prov'))load();
+    }catch(e){}
+  },1200);
+})();
+</script>
+
+<script>
+/* MCP 栏：不做假的「安装」按钮。
+   分两类如实标注：我们的内置工具已经等价具备的能力 / 需要 MCP 协议支持（尚未实现）。 */
+(function(){
+  var CAT=[
+    ["Fetch 网页抓取","抓取网页并转成适合模型读的文本","内置已具备：web_fetch 工具"],
+    ["Filesystem 文件","读写、检索本地文件","内置已具备：read/write/edit/glob/grep"],
+    ["Playwright 浏览器","浏览器自动化与截图","内置已具备：bash 里可驱动浏览器"],
+    ["GitHub","仓库、issue、PR 管理","内置已具备：bash + git 命令"],
+    ["GitLab","GitLab API 集成","内置已具备：bash + git/curl"],
+    ["TodoList 任务","任务清单管理","内置已具备：待办拆解技能"],
+    ["Context7 文档","拉取最新库文档和代码示例","内置已具备：web_fetch + 公开信息检索技能"],
+    ["Tavily 搜索","实时网页搜索与内容提取","需要搜索 API 密钥，暂未内置"],
+    ["Firecrawl","网页抓取与结构化提取","需 MCP 协议支持（未实现）"],
+    ["Notion","页面与数据库操作","需 MCP 协议支持（未实现）"],
+    ["Slack","频道与消息","需 MCP 协议支持（未实现）"],
+    ["Gmail","邮件收发与检索","需 MCP 协议支持（未实现）"],
+    ["Google Drive","文件访问与搜索","需 MCP 协议支持（未实现）"],
+    ["Google Calendar","日历管理","需 MCP 协议支持（未实现）"],
+    ["Canva","设计平台集成","需 MCP 协议支持（未实现）"],
+    ["企查查","企业工商信息查询","需 MCP 协议支持（未实现）"]
+  ];
+  var TILES=['#eef2ff','#e0f2fe','#f0fdf4','#fef3c7','#fce7f3','#f3e8ff'];
+  function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
+  function paint(){
+    var grid=document.getElementById('mg-grid');
+    if(!grid||grid.dataset.mcp==='1')return;
+    grid.dataset.mcp='1';
+    grid.innerHTML='';
+    var head=el('div','','MCP 服务端');
+    head.style.cssText='grid-column:1/-1;font-size:13px;color:#6b7280;line-height:1.7;margin-bottom:4px';
+    head.textContent='我们的智能体本身带工具（读写文件、执行命令、抓网页、子智能体），下面标「内置已具备」的就是这些能力。MCP 协议本身（启动外部 MCP 服务并接入其工具）尚未实现，所以不放假按钮。';
+    grid.appendChild(head);
+    CAT.forEach(function(row,i){
+      var c=el('div','mg-card');
+      var tile=el('div','mg-tile','◈');tile.style.background=TILES[i%TILES.length];
+      c.appendChild(tile);
+      var main=el('div','mg-main');
+      var hd=el('div','mg-head');hd.appendChild(el('span','mg-name',row[0]));
+      var ok=row[2].indexOf('内置')===0;
+      var b=el('span','mg-btn',ok?'内置已具备':'未支持');
+      if(!ok){b.style.color='#9aa1ab';b.style.cursor='default';}
+      hd.appendChild(b);main.appendChild(hd);
+      main.appendChild(el('div','mg-desc',row[1]));
+      main.appendChild(el('div','mg-tags',row[2]));
+      c.appendChild(main);grid.appendChild(c);
+    });
+  }
+  document.addEventListener('click',function(e){
+    var tb=e.target&&e.target.classList&&e.target.classList.contains('mg-tab')?e.target:null;
+    if(!tb)return;
+    if(tb.textContent.trim()==='MCP'){setTimeout(paint,60);}
+    else{var g=document.getElementById('mg-grid');if(g)g.dataset.mcp='';}
+  });
+})();
+</script>
 </body>
 </html>
 

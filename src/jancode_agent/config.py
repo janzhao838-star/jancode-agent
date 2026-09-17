@@ -22,7 +22,7 @@ BUILTIN_PROVIDERS: dict[str, dict[str, str]] = {
     "aionclaw": {
         "base_url": "https://router.aionclaw.com/v1",
         "model": "deepseek-v4-pro",
-        "label": "AionClaw 中转站",
+        "label": "钧子AI",
     },
     "janzhao": {
         "base_url": "https://janzhao.cn:9090/v1",
@@ -32,7 +32,7 @@ BUILTIN_PROVIDERS: dict[str, dict[str, str]] = {
     "junzi": {
         "base_url": "https://charlene.cat:9090/v1",
         "model": "deepseek-v3",
-        "label": "钧子AI 中转站",
+        "label": "钧子AI",
     },
     "deepseek": {
         "base_url": "https://api.deepseek.com/v1",

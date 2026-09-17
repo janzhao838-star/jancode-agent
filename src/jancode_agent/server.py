@@ -184,6 +184,11 @@ class Handler(BaseHTTPRequestHandler):
                  "has_key": bool(row.get("api_key")),
                  "is_active": row["name"] == active} for row in items]})
             return
+        if self.path == "/api/vendors":
+            from .catalog import vendors
+
+            self._json({"ok": True, "vendors": vendors()})
+            return
         if self.path == "/api/models":
             self._models()
             return
