@@ -51,7 +51,10 @@ def test_前端读的事件字段服务端都发了():
 
 def test_前端认识的_kind_服务端都会发():
     """界面按 kind 分支处理。服务端要是发了界面不认识的 kind，那条事件会被静默丢弃。"""
-    handled = set(re.findall(r"ev\.kind\s*===\s*'([a-z]+)'", INDEX))
+    # 引号单双都认：界面代码用什么引号是风格问题，契约只关心「处理了哪些 kind」。
+    # 只认单引号的话，界面改用双引号就会让这个测试以「解析不出 kind」为由失败，
+    # 报的是假问题，真正要防的「服务端发了界面不认识的 kind」反而没查。
+    handled = set(re.findall(r"""ev\.kind\s*===\s*["']([a-z]+)["']""", INDEX))
     assert handled, "没能解析出界面处理的 kind"
 
     import inspect
@@ -88,7 +91,8 @@ def test_pyproject_把界面文件声明成了包数据():
 def test_界面文件确实被打包进服务():
     body = _index_html()
     assert b"<!DOCTYPE html>" in body
-    assert "JanCode Agent" in body.decode("utf-8")
+    # 标题是界面身份的一部分：换成别人的名字说明发出去的不是这个页面。
+    assert "JanCode 智能体" in body.decode("utf-8")
 
 
 def test_serve_用传进来的配置而不是重新读一遍(monkeypatch, tmp_path):

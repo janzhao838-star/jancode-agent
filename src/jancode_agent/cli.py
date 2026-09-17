@@ -114,6 +114,41 @@ async def _interactive(agent: Agent, verbose: bool) -> int:
         await _run_once(agent, line, verbose)
 
 
+def build_config(args) -> AgentConfig:
+    """把命令行参数装配成运行配置。
+
+    单独抽出来给桌面版复用：桌面版要的是同一套覆盖规则（--base-url / --model /
+    --no-subagents …），各写一份迟早会漂移——上次 --web 忽略 --api-key 就是这么来的。
+    """
+    from dataclasses import replace
+
+    workspace = Path(args.workspace).expanduser().resolve()
+    if not workspace.is_dir():
+        raise ValueError(f"工作目录不存在：{workspace}")
+
+    try:
+        config = load_config(provider_name=args.provider, workspace=workspace)
+    except ValueError as exc:
+        raise ValueError(f"配置错误：{exc}") from exc
+
+    # 命令行参数覆盖配置文件
+    provider = config.provider
+    if getattr(args, "base_url", None):
+        provider = replace(provider, base_url=args.base_url.rstrip("/"))
+    if getattr(args, "model", None):
+        provider = replace(provider, model=args.model)
+    if getattr(args, "api_key", None):
+        provider = replace(provider, api_key=args.api_key)
+    config = replace(config, provider=provider)
+    if getattr(args, "max_steps", None):
+        config = replace(config, max_steps=args.max_steps)
+    if getattr(args, "no_bash", False):
+        config = replace(config, allow_bash=False)
+    if getattr(args, "no_subagents", False):
+        config = replace(config, allow_subagents=False)
+    return config
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
 
@@ -121,33 +156,11 @@ def main(argv: list[str] | None = None) -> int:
         _show_providers()
         return 0
 
-    workspace = Path(args.workspace).expanduser().resolve()
-    if not workspace.is_dir():
-        print(f"工作目录不存在：{workspace}", file=sys.stderr)
-        return 2
-
     try:
-        config = load_config(provider_name=args.provider, workspace=workspace)
+        config = build_config(args)
     except ValueError as exc:
-        print(f"配置错误：{exc}", file=sys.stderr)
+        print(str(exc), file=sys.stderr)
         return 2
-
-    # 命令行参数覆盖配置文件
-    from dataclasses import replace
-    provider = config.provider
-    if args.base_url:
-        provider = replace(provider, base_url=args.base_url.rstrip("/"))
-    if args.model:
-        provider = replace(provider, model=args.model)
-    if args.api_key:
-        provider = replace(provider, api_key=args.api_key)
-    config = replace(config, provider=provider)
-    if args.max_steps:
-        config = replace(config, max_steps=args.max_steps)
-    if args.no_bash:
-        config = replace(config, allow_bash=False)
-    if args.no_subagents:
-        config = replace(config, allow_subagents=False)
 
     if args.doctor:
         # 自检放在命令行覆盖**之后**：以前它自己又 load_config 了一遍，

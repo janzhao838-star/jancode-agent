@@ -5,6 +5,42 @@
 不绑定任何厂商 SDK，不内置推广，不向任何第三方回传数据。换一个 `base_url`
 就换一个模型。
 
+## 桌面版（双击就能用）
+
+不想碰命令行就用桌面版：一个原生窗口，左边是对话历史、工作区和当前模型，
+中间直接说人话。支持 macOS 和 Windows。
+
+下载：<https://github.com/janzhao838-star/jancode-agent/releases/latest>
+
+| 系统 | 文件 |
+| --- | --- |
+| macOS（Apple 芯片） | `JanCode-Agent-macos-arm64.zip` |
+| macOS（Intel） | `JanCode-Agent-macos-x64.zip` |
+| Windows 64 位 | `JanCode-Agent-windows-x64.zip` |
+
+macOS 第一次打开会被系统拦一下——安装包没有苹果的付费开发者签名，开源项目
+大多如此。在「应用程序」里**右键点图标 → 打开 → 再点打开**，之后就不拦了。
+Windows 直接运行 `JanCode-Agent.exe`，不需要另外装 Python。
+
+想自己打：
+
+```bash
+pip install -e ".[desktop]" pyinstaller
+bash scripts/build-desktop.sh
+```
+
+### 桌面版里有什么
+
+- **对话历史**：每次对话都留着，随时点回去；可以删，可以重跑
+- **工具调用明细**：每一步读了哪个文件、跑了什么命令，点一下展开完整输出
+- **子智能体分层展示**：子智能体干的活缩进显示，看得出到底是谁在干活
+- **微信推送**：填一个企业微信群机器人 webhook，任务跑完把结论推到群里
+- **说话即用**：不用记任何命令
+
+桌面版没有另写一套界面，用的就是 `jancode-agent --web` 那个页面，只是装进了
+系统自带窗口（macOS 用 WKWebView，Windows 用 WebView2），所以不多占内存，
+安装包也小。
+
 ## 为什么做这个
 
 市面上多数同类工具默认接国外模型、依赖国外服务，并且把推广码和推荐位写死在

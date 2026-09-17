@@ -64,7 +64,58 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send(404, b"not found", "text/plain")
 
+    def _json(self, payload: dict, code: int = 200) -> None:
+        self._send(code, json.dumps(payload, ensure_ascii=False).encode(), "application/json")
+
+    def _notify(self) -> None:
+        """把一段文本推到企业微信群机器人。
+
+        只收 https：http 会把任务结论明文发到网上。这种「图省事」的写法一旦被
+        抄进教程就到处流传，所以这里直接拒绝，而不是加一句注释提醒。
+        """
+        try:
+            payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+        except (ValueError, UnicodeDecodeError):
+            self._json({"ok": False, "error": "请求体不是 JSON"}, 400)
+            return
+
+        url = str(payload.get("webhook") or "").strip()
+        text = str(payload.get("text") or "").strip()[:4000]
+        if not url.startswith("https://"):
+            self._json({"ok": False, "error": "webhook 必须是 https 地址"})
+            return
+        if not text:
+            self._json({"ok": False, "error": "推送内容为空"})
+            return
+
+        try:
+            import httpx
+
+            resp = httpx.post(
+                url,
+                json={"msgtype": "markdown", "markdown": {"content": text}},
+                timeout=10.0,
+            )
+        except Exception as exc:
+            self._json({"ok": False, "error": f"推送失败：{exc}"})
+            return
+
+        if resp.status_code >= 400:
+            self._json({"ok": False, "error": f"对方返回 {resp.status_code}"})
+            return
+        try:
+            data = resp.json()
+        except ValueError:
+            data = {}
+        if data.get("errcode"):
+            self._json({"ok": False, "error": f"企业微信返回 {data.get('errcode')}：{data.get('errmsg', '')}"})
+            return
+        self._json({"ok": True})
+
     def do_POST(self) -> None:
+        if self.path == "/api/notify":
+            self._notify()
+            return
         if self.path != "/api/run":
             self._send(404, b"not found", "text/plain")
             return
@@ -116,6 +167,31 @@ class Handler(BaseHTTPRequestHandler):
         emit({"kind": "done"})
 
 
+class MissingApiKey(RuntimeError):
+    """没配密钥。
+
+    单独一个异常类型，是为了让调用方分辨「配置没弄好」和「端口被占了」
+    这两类完全不同的失败——它们的处理方式不一样。
+    """
+
+
+def build_server(host: str = "127.0.0.1", port: int = 8765, workspace: Path | None = None,
+                 provider: str | None = None,
+                 config: AgentConfig | None = None) -> ThreadingHTTPServer:
+    """装配好配置、建好服务，但**不启动**。
+
+    把「建」和「跑」分开是为了桌面版：它要在后台线程里跑 serve_forever，
+    并在窗口关掉时自己 shutdown。两者揉在一起的话，桌面版只能另抄一份出来，
+    以后改一处忘一处。
+    """
+    Handler.config = config or load_config(
+        provider_name=provider, workspace=workspace or Path.cwd())
+    if not Handler.config.provider.api_key:
+        raise MissingApiKey(
+            "未提供 API 密钥。请设置环境变量 JANCODE_API_KEY 后重试。")
+    return ThreadingHTTPServer((host, port), Handler)
+
+
 def serve(host: str = "127.0.0.1", port: int = 8765, workspace: Path | None = None,
           provider: str | None = None, open_browser: bool = True,
           config: AgentConfig | None = None) -> int:
@@ -129,13 +205,12 @@ def serve(host: str = "127.0.0.1", port: int = 8765, workspace: Path | None = No
     配置文件——用参数给密钥的人看到的是「未提供 API 密钥」，而 --no-bash、
     --no-subagents 这些开关更是被静默丢掉，用户以为禁掉了其实没有。
     """
-    Handler.config = config or load_config(
-        provider_name=provider, workspace=workspace or Path.cwd())
-    if not Handler.config.provider.api_key:
-        print("未提供 API 密钥。请设置环境变量 JANCODE_API_KEY 后重试。")
+    try:
+        httpd = build_server(host, port, workspace, provider, config)
+    except MissingApiKey as exc:
+        print(str(exc))
         return 2
 
-    httpd = ThreadingHTTPServer((host, port), Handler)
     url = f"http://{host}:{port}/"
     # 每行都 flush：输出重定向到文件时 stdout 是块缓冲，不 flush 的话
     # 用户（和读日志的脚本）要等缓冲区满才看得到"已启动"。

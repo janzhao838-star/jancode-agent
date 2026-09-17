@@ -2,187 +2,475 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<title>JanCode 智能体</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>JanCode Agent</title>
 <style>
-  :root{
-    --bg:232 33% 5%; --panel:232 28% 9%; --line:232 20% 18%;
-    --fg:220 20% 92%; --dim:220 12% 60%;
-    --accent:252 90% 68%; --accent2:189 100% 50%; --ok:150 60% 45%; --bad:0 70% 60%;
-  }
+  :root{--bg:240 18% 8%;--panel:240 16% 11%;--panel2:240 15% 14%;--line:240 12% 20%;
+        --fg:240 18% 92%;--dim:240 10% 62%;--accent:265 82% 66%;--accent2:190 85% 55%;
+        --ok:150 60% 45%;--bad:0 70% 58%;--warn:38 85% 55%}
   *{box-sizing:border-box}
-  body{margin:0;background:hsl(var(--bg));color:hsl(var(--fg));
-    font:14px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
-    display:flex;flex-direction:column;height:100vh}
-  header{padding:12px 18px;border-bottom:1px solid hsl(var(--line));
-    display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-  .logo{width:26px;height:26px;border-radius:8px;
-    background:linear-gradient(135deg,hsl(var(--accent)),hsl(var(--accent2)))}
-  h1{font-size:15px;margin:0;font-weight:600}
-  .meta{color:hsl(var(--dim));font-size:12px;margin-left:auto;text-align:right}
-  main{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:12px}
-  .msg{max-width:820px;padding:10px 14px;border-radius:10px;white-space:pre-wrap;
-    word-break:break-word}
-  .me{align-self:flex-end;background:hsl(var(--accent)/.18);
-    border:1px solid hsl(var(--accent)/.3)}
-  .ai{align-self:flex-start;background:hsl(var(--panel));
-    border:1px solid hsl(var(--line))}
-  .tool{align-self:flex-start;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    font-size:12px;color:hsl(var(--dim));border-left:2px solid hsl(var(--line));
-    padding:4px 12px;max-width:820px;white-space:pre-wrap}
-  .tool.ok{border-left-color:hsl(var(--ok))}
-  .tool.bad{border-left-color:hsl(var(--bad));color:hsl(var(--bad))}
-  .tool.sub{border-left-style:dashed;margin-left:24px;opacity:.85;font-size:11.5px}
-  .err{align-self:flex-start;background:hsl(var(--bad)/.12);
-    border:1px solid hsl(var(--bad)/.4);color:hsl(var(--bad))}
-  .hint{color:hsl(var(--dim));text-align:center;margin-top:40px;font-size:13px}
-  footer{border-top:1px solid hsl(var(--line));padding:12px 18px;display:flex;gap:10px}
-  textarea{flex:1;background:hsl(var(--panel));color:hsl(var(--fg));
-    border:1px solid hsl(var(--line));border-radius:9px;padding:10px 12px;
-    font:inherit;resize:none;height:52px;outline:none}
-  textarea:focus{border-color:hsl(var(--accent)/.6)}
-  button{background:linear-gradient(135deg,hsl(var(--accent)),hsl(var(--accent2)));
-    color:#0b0b14;border:0;border-radius:9px;padding:0 20px;font-weight:600;
-    cursor:pointer;font-size:14px}
-  button:disabled{opacity:.45;cursor:not-allowed}
-  .spin{display:inline-block;width:10px;height:10px;border-radius:50%;
-    border:2px solid hsl(var(--accent));border-top-color:transparent;
-    animation:s .7s linear infinite;vertical-align:-1px;margin-right:6px}
-  @keyframes s{to{transform:rotate(360deg)}}
+  html,body{height:100%;margin:0}
+  body{background:hsl(var(--bg));color:hsl(var(--fg));display:flex;overflow:hidden;
+       font:13px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+  aside{width:266px;flex:none;background:hsl(var(--panel));border-right:1px solid hsl(var(--line));
+        display:flex;flex-direction:column;height:100%}
+  .brand{padding:14px 16px;font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px;
+         border-bottom:1px solid hsl(var(--line))}
+  .dot{width:8px;height:8px;border-radius:50%;background:linear-gradient(135deg,hsl(var(--accent)),hsl(var(--accent2)))}
+  .newbtn{margin:12px;padding:9px 12px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;
+          background:linear-gradient(135deg,hsl(var(--accent)),hsl(var(--accent2)));color:#0b0b12;border:0}
+  .newbtn:hover{filter:brightness(1.08)}
+  .side-scroll{flex:1;overflow-y:auto;padding:0 8px 8px}
+  .side-title{padding:10px 8px 6px;font-size:11px;color:hsl(var(--dim))}
+  .sitem{padding:8px 10px;border-radius:7px;cursor:pointer;display:flex;gap:8px;align-items:baseline}
+  .sitem:hover{background:hsl(var(--panel2))}
+  .sitem.active{background:hsl(var(--panel2));box-shadow:inset 2px 0 0 hsl(var(--accent))}
+  .sitem .t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sitem .d{font-size:10.5px;color:hsl(var(--dim));flex:none}
+  .sitem .x{opacity:0;color:hsl(var(--dim));flex:none}
+  .sitem:hover .x{opacity:1}
+  .empty{padding:8px 10px;color:hsl(var(--dim));font-size:12px}
+  .info{border-top:1px solid hsl(var(--line));padding:10px 14px;font-size:11.5px;color:hsl(var(--dim))}
+  .info div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .info b{color:hsl(var(--fg));font-weight:500}
+  main{flex:1;display:flex;flex-direction:column;height:100%;min-width:0}
+  header{padding:12px 18px;border-bottom:1px solid hsl(var(--line));background:hsl(var(--panel));
+         display:flex;align-items:center;gap:10px}
+  header .ttl{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  header .sp{flex:1}
+  .ghost{background:transparent;color:hsl(var(--dim));border:1px solid hsl(var(--line));border-radius:7px;
+         padding:5px 10px;cursor:pointer;font-size:12px}
+  .ghost:hover{color:hsl(var(--fg));border-color:hsl(var(--accent))}
+  #log{flex:1;overflow-y:auto;padding:18px 18px 8px}
+  .welcome{max-width:620px;margin:7vh auto 0;text-align:center;color:hsl(var(--dim))}
+  .welcome h1{font-size:19px;color:hsl(var(--fg));margin:0 0 10px}
+  .tips{margin-top:18px;display:grid;gap:8px}
+  .tip{background:hsl(var(--panel));border:1px solid hsl(var(--line));border-radius:9px;
+       padding:10px 12px;text-align:left;cursor:pointer;font-size:12.5px}
+  .tip:hover{border-color:hsl(var(--accent));color:hsl(var(--fg))}
+  .turn{background:hsl(var(--panel));border:1px solid hsl(var(--line));border-radius:10px;
+        padding:10px 12px;margin:0 auto 12px;max-width:900px}
+  .turn-head{display:flex;align-items:center;gap:8px;font-size:11px;color:hsl(var(--dim));margin-bottom:6px}
+  .turn-head .idx{color:hsl(var(--accent2));font-weight:600}
+  .turn-head .sp{flex:1}
+  .turn-head .act{cursor:pointer;opacity:.6}
+  .turn-head .act:hover{opacity:1;color:hsl(var(--fg))}
+  .st{width:7px;height:7px;border-radius:50%;background:hsl(var(--warn))}
+  .st.ok{background:hsl(var(--ok))}
+  .st.bad{background:hsl(var(--bad))}
+  .you{white-space:pre-wrap;word-break:break-word}
+  .you::before{content:"你  ";color:hsl(var(--accent));font-weight:600}
+  .ans{margin-top:6px;white-space:pre-wrap;word-break:break-word}
+  .ans::before{content:"智能体  ";color:hsl(var(--accent2));font-weight:600}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .chip{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;background:hsl(var(--panel2));
+        border:1px solid hsl(var(--line));border-radius:6px;padding:3px 7px;cursor:pointer;color:hsl(var(--dim));
+        max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chip:hover{color:hsl(var(--fg));border-color:hsl(var(--accent))}
+  .chip.ok{border-left:2px solid hsl(var(--ok))}
+  .chip.bad{border-left:2px solid hsl(var(--bad));color:hsl(var(--bad))}
+  .chip.sub{border-style:dashed}
+  .chip-body{margin-top:6px;padding:8px 10px;background:#0c0c12;border:1px solid hsl(var(--line));
+             border-radius:7px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;
+             white-space:pre-wrap;word-break:break-word;max-height:320px;overflow:auto;color:hsl(var(--dim))}
+  .err{color:hsl(var(--bad));margin-top:6px;white-space:pre-wrap}
+  .composer{border-top:1px solid hsl(var(--line));padding:12px 18px 14px;background:hsl(var(--panel))}
+  .cwrap{max-width:900px;margin:0 auto}
+  textarea{width:100%;min-height:74px;max-height:240px;resize:vertical;background:hsl(var(--panel2));
+           color:hsl(var(--fg));border:1px solid hsl(var(--line));border-radius:9px;padding:10px 12px;
+           font:inherit;outline:none}
+  textarea:focus{border-color:hsl(var(--accent))}
+  .crow{display:flex;align-items:center;gap:10px;margin-top:8px}
+  .crow .hint{color:hsl(var(--dim));font-size:11.5px;flex:1}
+  button.primary{background:linear-gradient(135deg,hsl(var(--accent)),hsl(var(--accent2)));color:#0b0b12;
+                 border:0;border-radius:8px;padding:8px 18px;font-weight:600;cursor:pointer;font-size:13px}
+  button.primary:disabled{opacity:.5;cursor:default}
+  .mask{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center}
+  .mask.on{display:flex}
+  .dlg{background:hsl(var(--panel));border:1px solid hsl(var(--line));border-radius:12px;
+       width:560px;max-width:92vw;padding:18px 20px}
+  .dlg h2{margin:0 0 12px;font-size:15px}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:12px;color:hsl(var(--dim));margin-bottom:5px}
+  .field input{width:100%;background:hsl(var(--panel2));color:hsl(var(--fg));border:1px solid hsl(var(--line));
+               border-radius:7px;padding:8px 10px;font:inherit;outline:none}
+  .field .note{font-size:11px;color:hsl(var(--dim));margin-top:5px}
+  .kv{font-size:12px;color:hsl(var(--dim));margin-bottom:14px;line-height:1.9}
+  .kv b{color:hsl(var(--fg));font-weight:500}
+  .drow{display:flex;justify-content:flex-end;gap:10px}
 </style>
 </head>
 <body>
-<header>
-  <div class="logo"></div>
-  <h1>JanCode Agent</h1>
-  <div class="meta" id="meta">正在读取配置…</div>
-</header>
-<main id="log">
-  <div class="hint">在下面描述你要做的事，例如「读一下这个项目，告诉我它是干什么的」<br>智能体能读写文件、执行命令，改动都限制在当前工作目录内</div>
+<aside>
+  <div class="brand"><span class="dot"></span> JanCode 智能体</div>
+  <button class="newbtn" id="newChat">＋ 新建对话</button>
+  <div class="side-scroll">
+    <div class="side-title">对话历史</div>
+    <div id="sessions"></div>
+  </div>
+  <div class="info">
+    <div>工作区 <b id="ws">—</b></div>
+    <div>模型 <b id="mdl">—</b></div>
+    <div id="wpush">微信推送 未开启</div>
+    <div style="margin-top:6px"><span class="act" id="setBtn2" style="cursor:pointer">设置与微信推送</span></div>
+  </div>
+</aside>
+<main>
+  <header>
+    <div class="ttl" id="ttl">新对话</div>
+    <div class="sp"></div>
+    <button class="ghost" id="clearBtn">清空本对话</button>
+    <button class="ghost" id="setBtn">设置</button>
+  </header>
+  <div id="log"></div>
+  <div class="composer">
+    <div class="cwrap">
+      <textarea id="input" placeholder="描述你要做的事…（Enter 发送，Shift+Enter 换行）"></textarea>
+      <div class="crow">
+        <div class="hint" id="hint">就绪</div>
+        <button class="primary" id="send">发送</button>
+      </div>
+    </div>
+  </div>
 </main>
-<footer>
-  <textarea id="input" placeholder="描述你的任务…（Enter 发送，Shift+Enter 换行）"></textarea>
-  <button id="send">发送</button>
-</footer>
+<div class="mask" id="mask">
+  <div class="dlg">
+    <h2>设置</h2>
+    <div class="kv" id="setInfo"></div>
+    <div class="field">
+      <label>微信推送（企业微信群机器人 Webhook）</label>
+      <input id="hook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...">
+      <div class="note">填上后，每个任务完成时会把结论推到群里。留空即关闭。其他平台暂不支持。</div>
+    </div>
+    <div class="drow">
+      <button class="ghost" id="hookTest">发一条测试</button>
+      <button class="primary" id="setSave">保存</button>
+    </div>
+  </div>
+</div>
 <script>
-const log = document.getElementById('log');
-const input = document.getElementById('input');
-const send = document.getElementById('send');
-let history = [], busy = false;
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var log = $("log"), input = $("input"), sendBtn = $("send"), hint = $("hint");
+  var info = {}, store = loadStore();
+  var cur = store.current ? find(store.current) : null;
+  // 开局先建一个空对话。不建的话左侧「对话历史」是空的，
+  // 用户看到的是一个什么都没有的栏目，只会以为功能坏了。
+  if (!cur) { cur = newSession(); }
+  var busy = false, live = null;
 
-fetch('/api/info').then(r => r.json()).then(d => {
-  document.getElementById('meta').innerHTML =
-    `${d.label} · ${d.model}<br>${d.workspace}`;
-  if (!d.has_key) {
-    const w = document.createElement('div');
-    w.className = 'msg err';
-    w.textContent = '未检测到 API 密钥。请设置环境变量 JANCODE_API_KEY 后重启服务。';
-    log.appendChild(w);
+  function loadStore() {
+    var raw = null;
+    try { raw = JSON.parse(localStorage.getItem("jancode.sessions") || "null"); } catch (e) { raw = null; }
+    if (!raw || typeof raw !== "object") raw = { list: [], current: null, hook: "" };
+    if (!Array.isArray(raw.list)) raw.list = [];
+    if (typeof raw.hook !== "string") raw.hook = "";
+    return raw;
   }
-}).catch(() => {
-  document.getElementById('meta').textContent = '无法读取配置';
-});
+  function save() { try { localStorage.setItem("jancode.sessions", JSON.stringify(store)); } catch (e) {} }
+  function find(id) { for (var i = 0; i < store.list.length; i++) if (store.list[i].id === id) return store.list[i]; return null; }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+  function clock(ts) {
+    var d = new Date(ts);
+    return pad(d.getMonth() + 1) + "/" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+  function newSession() {
+    var s = { id: "s" + Date.now().toString(36), title: "新对话", turns: [], ts: Date.now() };
+    store.list.unshift(s); store.current = s.id; save();
+    return s;
+  }
 
-function add(cls, text) {
-  const el = document.createElement('div');
-  el.className = 'msg ' + cls;
-  el.textContent = text;
-  log.appendChild(el);
-  log.scrollTop = log.scrollHeight;
-  return el;
-}
+  fetch("/api/info").then(function (r) { return r.json(); }).then(function (d) {
+    info = d;
+    $("ws").textContent = d.workspace; $("ws").title = d.workspace;
+    $("mdl").textContent = (d.label ? d.label + " · " : "") + d.model;
+    $("mdl").title = d.base_url;
+    if (!d.has_key) hint.textContent = "未配置 API 密钥，无法执行任务";
+    renderSide(); renderMain();
+  }).catch(function () { hint.textContent = "无法连接本地服务"; });
 
-async function run() {
-  const prompt = input.value.trim();
-  if (!prompt || busy) return;
-  busy = true; send.disabled = true; input.value = '';
-
-  const hint = log.querySelector('.hint');
-  if (hint) hint.remove();
-  add('msg me', prompt);
-  history.push({ role: 'user', content: prompt });
-
-  const status = document.createElement('div');
-  status.className = 'tool';
-  status.innerHTML = '<span class="spin"></span>思考中…';
-  log.appendChild(status); log.scrollTop = log.scrollHeight;
-
-  let answer = '';
-  try {
-    const resp = await fetch('/api/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, history: history.slice(0, -1) }),
-    });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = '';
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop();
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        let ev; try { ev = JSON.parse(line); } catch { continue; }
-        if (ev.kind === 'tool' && ev.subagent) {
-          // 子智能体的工具调用：单独占一行并缩进。
-          // 不能复用下面的 status 行——那是主流程的状态位，
-          // 被子步骤反复覆盖之后就看不出主流程正在等什么了。
-          add('tool sub', '↳ [' + ev.subagent + '] ' + ev.tool +
-              (ev.text ? '  ' + ev.text.split('\n')[0].slice(0, 140) : ' …'));
-        } else if (ev.kind === 'tool') {
-          if (ev.text) {
-            status.className = 'tool ' + (ev.ok ? 'ok' : 'bad');
-            status.textContent = ev.tool + '  ' + ev.text.split('\n')[0].slice(0, 160);
-            status = document.createElement('div');
-            status.className = 'tool';
-            status.innerHTML = '<span class="spin"></span>继续中…';
-            log.appendChild(status);
-          } else {
-            status.innerHTML = '<span class="spin"></span>' + ev.tool + ' …';
-          }
-        } else if (ev.kind === 'answer' && ev.subagent) {
-          // 子智能体的结论随后会作为工具结果回灌给主智能体，
-          // 这里只提示一句，避免和主智能体的最终答复混淆。
-          add('tool sub', '↳ [' + ev.subagent + '] 已给出结论');
-        } else if (ev.kind === 'answer') {
-          answer = ev.text;
-        } else if (ev.kind === 'error') {
-          status.remove();
-          add('msg err', (ev.subagent ? '[' + ev.subagent + '] ' : '') + ev.text);
-          status = document.createElement('div');
-        } else if (ev.kind === 'done') {
-          // 显式处理：服务端用 done 标记流结束。这里不需要做什么，
-          // 但必须写出来——否则「不认识就忽略」会让以后新增的事件类型
-          // 被静默丢弃，界面上表现为「没有任何反应」，极难排查。
-        } else {
-          // 服务端发了界面不认识的事件。宁可显示出来，也不要静默吞掉。
-          console.warn('未知事件类型', ev);
-          add('msg err', '收到无法识别的事件：' + JSON.stringify(ev).slice(0, 200));
-        }
-        log.scrollTop = log.scrollHeight;
-      }
+  function renderSide() {
+    $("wpush").textContent = store.hook ? "微信推送 已开启" : "微信推送 未开启";
+    var box = $("sessions");
+    if (!store.list.length) { box.innerHTML = '<div class="empty">还没有对话</div>'; return; }
+    var buf = "";
+    for (var i = 0; i < store.list.length; i++) {
+      var s = store.list[i];
+      buf += '<div class="sitem' + (cur && s.id === cur.id ? " active" : "") + '" data-id="' + s.id + '">' +
+             '<span class="t">' + esc(s.title) + '</span>' +
+             '<span class="d">' + clock(s.ts) + '</span>' +
+             '<span class="x" data-del="' + s.id + '">✕</span></div>';
     }
-  } catch (e) {
-    add('msg err', '请求失败：' + e.message);
+    box.innerHTML = buf;
   }
-  status.remove();
-  if (answer) {
-    add('msg ai', answer);
-    history.push({ role: 'assistant', content: answer });
-  }
-  busy = false; send.disabled = false; input.focus();
-}
 
-send.onclick = run;
-input.onkeydown = e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run(); }
-};
-input.focus();
+  $("sessions").addEventListener("click", function (e) {
+    var del = e.target.getAttribute && e.target.getAttribute("data-del");
+    if (del) {
+      e.stopPropagation();
+      store.list = store.list.filter(function (s) { return s.id !== del; });
+      if (store.current === del) { store.current = store.list.length ? store.list[0].id : null; }
+      cur = store.current ? find(store.current) : null;
+      save(); renderSide(); renderMain(); return;
+    }
+    var row = e.target.closest ? e.target.closest(".sitem") : null;
+    if (!row) return;
+    store.current = row.getAttribute("data-id"); cur = find(store.current);
+    save(); renderSide(); renderMain();
+  });
+
+  function tipsBox() {
+    var w = document.createElement("div");
+    w.className = "welcome";
+    w.innerHTML = "<h1>要做什么？</h1><div>直接说人话就行——它会自己读文件、跑命令、改代码。" +
+                  "任务大就派给子智能体，每一步都能看到。</div>";
+    var tips = document.createElement("div");
+    tips.className = "tips";
+    var list = ["看看这个项目是干什么的，用三句话说明",
+                "找出这个仓库里所有 TODO，按优先级列出来",
+                "跑一遍测试，失败的给我原因"];
+    for (var i = 0; i < list.length; i++) {
+      (function (txt) {
+        var d = document.createElement("div");
+        d.className = "tip"; d.textContent = txt;
+        d.onclick = function () { input.value = txt; input.focus(); };
+        tips.appendChild(d);
+      })(list[i]);
+    }
+    w.appendChild(tips);
+    return w;
+  }
+
+  function renderMain() {
+    $("ttl").textContent = (cur && cur.title) ? cur.title : "新对话";
+    log.innerHTML = "";
+    if (!cur || !cur.turns.length) { log.appendChild(tipsBox()); return; }
+    for (var i = 0; i < cur.turns.length; i++) log.appendChild(turnEl(cur.turns[i], i));
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function turnEl(t, index) {
+    var el = document.createElement("div");
+    el.className = "turn";
+    var cls = t.status === "ok" ? "ok" : (t.status === "bad" ? "bad" : "");
+    var head = document.createElement("div");
+    head.className = "turn-head";
+    head.innerHTML = '<span class="st ' + cls + '"></span><span class="idx">#' + (index + 1) + '</span>' +
+      '<span>' + clock(t.ts) + '</span>' + (t.secs ? '<span>· ' + t.secs + ' 秒</span>' : "") +
+      '<span class="sp"></span>' +
+      '<span class="act" data-copy="' + index + '">复制</span>' +
+      '<span class="act" data-again="' + index + '">重跑</span>';
+    el.appendChild(head);
+    var you = document.createElement("div");
+    you.className = "you"; you.textContent = t.prompt;
+    el.appendChild(you);
+    if (t.answer) {
+      var ans = document.createElement("div");
+      ans.className = "ans"; ans.textContent = t.answer;
+      el.appendChild(ans);
+    }
+    if (t.tools && t.tools.length) el.appendChild(chipsEl(t.tools));
+    if (t.error) {
+      var er = document.createElement("div");
+      er.className = "err"; er.textContent = "✗ " + t.error;
+      el.appendChild(er);
+    }
+    return el;
+  }
+
+  function chipsEl(tools) {
+    var box = document.createElement("div");
+    box.className = "chips";
+    for (var i = 0; i < tools.length; i++) {
+      (function (tool, idx) {
+        var c = document.createElement("div");
+        c.className = "chip" + (tool.ok === true ? " ok" : (tool.ok === false ? " bad" : "")) + (tool.sub ? " sub" : "");
+        c.textContent = (tool.sub ? "↳ [" + tool.sub + "] " : "") + tool.name +
+                        (tool.text ? "  " + String(tool.text).split("\n")[0].slice(0, 90) : " …");
+        var body = null;
+        c.onclick = function () {
+          if (body) { body.remove(); body = null; return; }
+          body = document.createElement("div");
+          body.className = "chip-body";
+          body.textContent = tool.text || "（没有输出）";
+          box.parentNode.insertBefore(body, box.nextSibling);
+        };
+        box.appendChild(c);
+      })(tools[i], i);
+    }
+    return box;
+  }
+
+  function pushTurn(t) {
+    if (!cur) cur = newSession();
+    cur.turns.push(t);
+    if (cur.title === "新对话") cur.title = t.prompt.slice(0, 22);
+    cur.ts = Date.now();
+    save();
+  }
+  function history() {
+    var h = [];
+    if (!cur) return h;
+    for (var i = 0; i < cur.turns.length; i++) {
+      h.push({ role: "user", content: cur.turns[i].prompt });
+      if (cur.turns[i].answer) h.push({ role: "assistant", content: cur.turns[i].answer });
+    }
+    return h.slice(-20);
+  }
+
+  function setBusy(on) {
+    busy = on;
+    sendBtn.disabled = on;
+    sendBtn.textContent = on ? "执行中…" : "发送";
+  }
+
+  async function run(prompt) {
+    if (busy || !prompt) return;
+    var turn = { prompt: prompt, answer: "", tools: [], error: "", status: "", ts: Date.now() };
+    pushTurn(turn);
+    cur.title = cur.title; renderSide(); renderMain();
+    live = { turn: turn, node: null };
+    setBusy(true);
+    hint.textContent = "执行中…";
+
+    var started = Date.now();
+    try {
+      var res = await fetch("/api/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: prompt, history: history() })
+      });
+      if (!res.ok) {
+        var msg = "服务返回 " + res.status;
+        try { var j = await res.json(); if (j.error) msg = j.error; } catch (e) {}
+        throw new Error(msg);
+      }
+      var reader = res.body.getReader(), dec = new TextDecoder(), buf = "";
+      while (true) {
+        var chunk = await reader.read();
+        if (chunk.done) break;
+        buf += dec.decode(chunk.value, { stream: true });
+        var lines = buf.split("\n");
+        buf = lines.pop();
+        for (var i = 0; i < lines.length; i++) {
+          var s = lines[i].trim();
+          if (!s) continue;
+          var ev = null;
+          try { ev = JSON.parse(s); } catch (e) { continue; }
+          handle(ev, turn);
+        }
+      }
+      turn.status = turn.error ? "bad" : "ok";
+    } catch (e) {
+      turn.status = "bad";
+      turn.error = String(e.message || e);
+    }
+    turn.secs = ((Date.now() - started) / 1000).toFixed(1);
+    live = null;
+    setBusy(false);
+    hint.textContent = "就绪";
+    save(); renderSide(); renderMain();
+    notify(turn);
+  }
+
+  function handle(ev, turn) {
+    if (ev.kind === "tool") {
+      var last = turn.tools.length ? turn.tools[turn.tools.length - 1] : null;
+      if (ev.text === "" || ev.text == null) {
+        turn.tools.push({ name: ev.tool || "工具", text: "", ok: null, sub: ev.subagent || "" });
+      } else if (last && last.name === (ev.tool || "工具") && last.sub === (ev.subagent || "")) {
+        last.text = ev.text; last.ok = ev.ok;
+      } else {
+        turn.tools.push({ name: ev.tool || "工具", text: ev.text, ok: ev.ok, sub: ev.subagent || "" });
+      }
+    } else if (ev.kind === "answer") {
+      if (ev.subagent) {
+        turn.tools.push({ name: "子智能体结论", text: ev.text, ok: true, sub: ev.subagent });
+      } else {
+        turn.answer = (turn.answer ? turn.answer + "\n" : "") + ev.text;
+      }
+    } else if (ev.kind === "error") {
+      turn.error = (ev.subagent ? "[" + ev.subagent + "] " : "") + ev.text;
+    } else if (ev.kind === "done") {
+      // 服务端在流结尾显式发一个 done。靠「流断了」判断结束是不可靠的：
+      // 连接被中途掐断和正常跑完，在 fetch 这一侧长得一模一样。
+      if (!turn.error) turn.status = "ok";
+    }
+    if (cur) { renderMain(); }
+  }
+
+  function notify(turn) {
+    if (!store.hook) return;
+    var text = "【JanCode】任务完成\n" + turn.prompt.slice(0, 60) +
+               (turn.answer ? "\n\n" + turn.answer.slice(0, 500) : "") +
+               (turn.error ? "\n\n失败：" + turn.error.slice(0, 200) : "");
+    fetch("/api/notify", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ webhook: store.hook, text: text })
+    }).catch(function () {});
+  }
+
+  sendBtn.onclick = function () {
+    var v = input.value.trim();
+    if (!v) return;
+    input.value = "";
+    run(v);
+  };
+  input.onkeydown = function (e) {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendBtn.onclick(); }
+  };
+  $("newChat").onclick = function () {
+    cur = newSession(); save(); renderSide(); renderMain(); input.focus();
+  };
+  $("clearBtn").onclick = function () {
+    if (!cur) return;
+    cur.turns = []; cur.title = "新对话"; save(); renderSide(); renderMain();
+  };
+  log.addEventListener("click", function (e) {
+    var a = e.target.getAttribute && e.target.getAttribute("data-copy");
+    var b = e.target.getAttribute && e.target.getAttribute("data-again");
+    if (a != null && cur) {
+      var t = cur.turns[Number(a)];
+      if (t) { try { navigator.clipboard.writeText(t.answer || ""); hint.textContent = "已复制"; } catch (err) {} }
+    } else if (b != null && cur) {
+      var t2 = cur.turns[Number(b)];
+      if (t2) run(t2.prompt);
+    }
+  });
+  $("setBtn2").onclick = function () { $("setBtn").onclick(); };
+  $("setBtn").onclick = function () {
+    $("setInfo").innerHTML =
+      "供应商 <b>" + esc(info.label || "-") + "</b><br>" +
+      "接口 <b>" + esc(info.base_url || "-") + "</b><br>" +
+      "模型 <b>" + esc(info.model || "-") + "</b><br>" +
+      "工作区 <b>" + esc(info.workspace || "-") + "</b><br>" +
+      "密钥 <b>" + (info.has_key ? "已配置" : "未配置") + "</b>";
+    $("hook").value = store.hook || "";
+    $("mask").classList.add("on");
+  };
+  $("mask").onclick = function (e) { if (e.target === $("mask")) $("mask").classList.remove("on"); };
+  $("setSave").onclick = function () {
+    store.hook = $("hook").value.trim(); save(); renderSide();
+    $("mask").classList.remove("on");
+  };
+  $("hookTest").onclick = function () {
+    var url = $("hook").value.trim();
+    if (!url) { hint.textContent = "先填 webhook 地址"; return; }
+    store.hook = url; save(); renderSide();
+    fetch("/api/notify", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ webhook: url, text: "【JanCode】微信推送测试，收到即说明配置正确。" })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      hint.textContent = d.ok ? "测试消息已发送" : ("发送失败：" + (d.error || "未知原因"));
+    }).catch(function () { hint.textContent = "发送失败：连不上本地服务"; });
+  };
+})();
 </script>
 </body>
 </html>
+

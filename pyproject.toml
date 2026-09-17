@@ -26,6 +26,9 @@ dependencies = ["httpx>=0.27"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+# 桌面版的依赖单独放：不装它照样能用命令行和网页版，装了才有原生窗口。
+# 分开的另一个原因——服务器上部署不需要拖进 GUI 依赖。
+desktop = ["pywebview>=5.0"]
 
 [project.scripts]
 # 两个名字都给：安装脚本创建的启动命令叫 jancode-agent，文档里也是这么写的，
@@ -33,6 +36,8 @@ dev = ["pytest>=8", "pytest-asyncio>=0.24"]
 # 用 pip 安装的人照着 README 敲 jancode-agent 会得到 command not found。
 jancode = "jancode_agent.cli:main"
 jancode-agent = "jancode_agent.cli:main"
+# 桌面版：双击用的入口，也是打包成 .app/.exe 时被冻结的入口。
+jancode-desktop = "jancode_agent.desktop:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
