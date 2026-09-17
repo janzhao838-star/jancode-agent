@@ -163,10 +163,12 @@ html,body{background:var(--soft)!important;color:var(--ink)}
 aside,.sidebar,#side,#sidebar{width:252px!important;min-width:252px!important;background:#fbfbfc!important;border-right:1px solid var(--edge)!important;padding:12px!important}
 main,.main,#main{background:var(--soft)!important}
 /* 侧栏菜单项：高一点、圆角、选中浅紫 + 左侧竖条 */
-[data-view]{display:flex!important;align-items:center;gap:9px;height:36px;padding:0 10px!important;border-radius:9px!important;font-size:13.5px;color:#3d434c!important;cursor:pointer;position:relative;transition:.14s}
-[data-view]:hover{background:#f1f1f5!important}
-[data-view].active,[data-view][aria-selected="true"]{background:#f2f0ff!important;color:#5b3ee8!important;font-weight:600}
-[data-view].active:before,[data-view][aria-selected="true"]:before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;background:linear-gradient(180deg,var(--b1),var(--b2))}
+/* 只作用于侧栏里的菜单项。之前没限定范围，把带 data-view 的视图容器
+   也变成了 36px 高的横条——整块内容被压没了，页面一片空白。 */
+aside [data-view],.sidebar [data-view],#side [data-view],#sidebar [data-view]{display:flex!important;align-items:center;gap:9px;height:36px;padding:0 10px!important;border-radius:9px!important;font-size:13.5px;color:#3d434c!important;cursor:pointer;position:relative;transition:.14s}
+aside [data-view]:hover,.sidebar [data-view]:hover,#side [data-view]:hover,#sidebar [data-view]:hover{background:#f1f1f5!important}
+aside [data-view].active,aside [data-view][aria-selected="true"],.sidebar [data-view].active,.sidebar [data-view][aria-selected="true"]{background:#f2f0ff!important;color:#5b3ee8!important;font-weight:600}
+aside [data-view].active:before,aside [data-view][aria-selected="true"]:before,.sidebar [data-view].active:before,.sidebar [data-view][aria-selected="true"]:before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;background:linear-gradient(180deg,var(--b1),var(--b2))}
 /* 卡片网格 */
 #skillsBody{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(420px,1fr))!important;gap:16px!important;align-content:start}
 .mg-card{background:#f8f8f9!important;border:1px solid transparent!important;border-radius:14px!important;padding:20px!important;display:flex!important;gap:16px!important;align-items:flex-start!important;box-shadow:none!important}
