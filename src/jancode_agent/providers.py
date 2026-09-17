@@ -166,6 +166,17 @@ class Client:
         try:
             data = resp.json()
         except ValueError as exc:
+            # 地址少写 /v1 是最常见的错误，此时对方通常返回一个网页（404/首页），
+            # 直接甩一段 HTML 给用户等于没说。这里做成能照着修的提示。
+            head = resp.text.lstrip()[:200]
+            looks_like_html = head[:1] == "<" or "<!doctype" in head[:40].lower()
+            if looks_like_html:
+                raise ProviderError(
+                    f"地址 {url} 返回的是网页，不是接口。\n"
+                    f"多半是接口地址少了 /v1（或地址填成了网站首页）。\n"
+                    f"正确写法一般是 https://你的中转站域名/v1\n"
+                    f"当前配置的地址是：{self.provider.base_url}"
+                ) from exc
             raise ProviderError(f"{url} 返回的不是 JSON：{resp.text[:300]}") from exc
 
         if self.provider.wire_api == "responses":

@@ -127,10 +127,14 @@ def apply_saved_settings(config: AgentConfig) -> AgentConfig:
         return config
     patched = provider_config(config, row)
     provider = patched.provider
+    # 只有 JANCODE_* 能盖掉界面里保存的配置。
+    # OPENAI_* 是通用变量，别的工具也会设（用户 shell 里就导出了一个
+    # 别人的中转站地址），让它盖掉用户自己在界面里配好的地址，会变成
+    # 「明明配好了却连不上」这种最难查的问题。
     for names, attr in (
-        (("JANCODE_API_KEY", "OPENAI_API_KEY"), "api_key"),
-        (("JANCODE_BASE_URL", "OPENAI_BASE_URL"), "base_url"),
-        (("JANCODE_MODEL", "OPENAI_MODEL"), "model"),
+        (("JANCODE_API_KEY",), "api_key"),
+        (("JANCODE_BASE_URL",), "base_url"),
+        (("JANCODE_MODEL",), "model"),
     ):
         if any(os.environ.get(n, "").strip() for n in names):
             provider = replace(provider, **{attr: getattr(config.provider, attr)})
