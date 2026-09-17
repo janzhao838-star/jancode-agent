@@ -644,14 +644,16 @@ class Handler(BaseHTTPRequestHandler):
         # 改了会串到别的任务上。
         from dataclasses import replace
 
-        from .library import find_agent, persona_prompt, skills_section
+        from .library import disclaimer_for, find_agent, persona_prompt, skills_section
 
         model = str(payload.get("model") or "").strip()
         config = self.config
 
         wanted = str(payload.get("agent") or "").strip()
         persona = find_agent(wanted) if wanted else None
+        disclaimer = ""
         if persona is not None:
+            disclaimer = disclaimer_for(persona.name)
             if not model and persona.model:
                 model = persona.model
             config = replace(config, system_extra=persona_prompt(persona))
@@ -662,6 +664,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if model and model != config.provider.model:
             config = replace(config, provider=replace(config.provider, model=model))
+
+        last_answer = {"text": ""}
 
         async def drive() -> None:
             async with Agent(config) as agent:
@@ -674,6 +678,8 @@ class Handler(BaseHTTPRequestHandler):
                         agent.messages.append(Message(role=role, content=content))
 
                 async for step in agent.run(prompt):
+                    if step.kind == "answer" and not step.subagent:
+                        last_answer["text"] = step.text
                     emit({"kind": step.kind, "text": step.text,
                           "tool": step.tool_name, "ok": step.tool_ok,
                           "subagent": step.subagent})
@@ -684,6 +690,12 @@ class Handler(BaseHTTPRequestHandler):
             emit({"kind": "error", "text": str(exc)})
         except Exception as exc:  # 兜底：任何异常都要让界面看到，而不是静默断流
             emit({"kind": "error", "text": f"内部错误：{exc}"})
+
+        # 法律声明由这里强制附加：模型忘了、改写了、或者被后续指令盖掉了，
+        # 都不影响用户在最后一定看得到它。这类声明的责任在程序，不在模型。
+        if disclaimer and disclaimer not in last_answer["text"]:
+            emit({"kind": "answer", "text": disclaimer, "tool": "", "ok": True,
+                  "subagent": ""})
         emit({"kind": "done"})
 
 

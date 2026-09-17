@@ -1482,7 +1482,7 @@ main,.main,#main{overflow:hidden}
     nav.id='mg-nav-auto';
     nav.setAttribute('data-view','automations');
     nav.classList.remove('active','on');
-    nav.textContent='自动化';
+    nav.textContent='自动化(RPA)';
     var svg=last.querySelector('svg');
     if(svg)nav.insertBefore(svg.cloneNode(true),nav.firstChild);
     last.parentNode.insertBefore(nav,last.nextSibling);
@@ -1689,6 +1689,34 @@ main,.main,#main{overflow:hidden}
     var v=document.getElementById('view-agents');
     if(v&&v.offsetHeight>0&&!document.getElementById('mg-exp'))load();
   }catch(e){}},1200);
+})();
+</script>
+
+<script>
+/* 侧栏对齐 AionClaw 的结构：
+   新建任务 / 项目 / 插件&技能 / 数字专家 / 自动化(RPA) / 定时任务。
+   只改标签文字和顺序，不动原有 data-view 的绑定，免得点不动。 */
+(function(){
+  var MAP={chat:'新建任务',files:'项目',tools:'工具与技能',skills:'插件&技能',agents:'数字专家',models:'模型接入'};
+  var ICON={chat:'◈',files:'▤',tools:'⚙',skills:'✦',agents:'☰',models:'◆'};
+  function fix(){
+    var items=document.querySelectorAll('.nitem[data-view],aside [data-view],.sidebar [data-view]');
+    items.forEach(function(i){
+      var v=i.getAttribute('data-view');
+      if(!v||!MAP[v])return;
+      var span=i.querySelector('.ni');
+      if(span){span.textContent=ICON[v];}
+      // 只替换文字节点，保留图标 span
+      for(var n=0;n<i.childNodes.length;n++){
+        var c=i.childNodes[n];
+        if(c.nodeType===3&&c.textContent.trim()){
+          if(c.textContent.trim()!==MAP[v])c.textContent=MAP[v];
+        }
+      }
+      if(v==='chat'){i.classList.add('mg-primary');}
+    });
+  }
+  setInterval(function(){try{fix();}catch(e){}},900);
 })();
 </script>
 </body>

@@ -988,3 +988,23 @@ def install_builtin_agent(name: str) -> bool:
             upsert_agent(name, item["prompt"], "", [])
             return True
     return False
+
+
+# ---------- 法律声明：由代码强制附加，不依赖模型自觉 ----------
+#
+# 提示词里写「记得加声明」是不牢靠的：模型会忘、会改写、会被后续指令盖掉。
+# 所以这里只负责给出标准文本，真正的附加在 server 的收口处强制执行——
+# 回答里没有声明就由程序补上，用户一定能看到。
+
+DISCLAIMERS: dict[str, str] = {
+    "股票研究助手": (
+        "以上内容是基于公开信息的事实与财务分析，仅供研究参考，"
+        "**不构成任何投资建议，也不预测股价**。投资有风险，据此操作风险自负。"),
+    "合同审阅员": (
+        "以上内容是对合同文本的风险提示，**不构成法律意见**。"
+        "重大合同、涉及重大权益的条款，请咨询执业律师后再签署。"),
+}
+
+
+def disclaimer_for(name: str) -> str:
+    return DISCLAIMERS.get(name or "", "")
