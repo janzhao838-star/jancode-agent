@@ -1035,6 +1035,11 @@ def serve(host: str = "127.0.0.1", port: int = 8765, workspace: Path | None = No
     print(f"模型 {Handler.config.provider.model} @ {Handler.config.provider.base_url}", flush=True)
     print("按 Ctrl+C 停止。\n", flush=True)
 
+    # 定时任务在这里也要盯上：桌面版自己会起调度器，但用户用
+    # jancode-agent serve 或 Python 直接调 serve() 时，界面上
+    # 建的自动化任务显示「已启用」却永远不会触发。
+    from .scheduler import start as start_scheduler
+    start_scheduler(Handler.config)
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:

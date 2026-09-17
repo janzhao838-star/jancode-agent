@@ -139,6 +139,9 @@ def run_once(item: Automation, config, runner) -> str:
         return f"执行失败：{exc}"
 
 
+_thread: threading.Thread | None = None
+
+
 def start(config, interval: float = 30.0) -> threading.Thread:
     """起一个后台线程盯着定时任务。
 
@@ -172,6 +175,12 @@ def start(config, interval: float = 30.0) -> threading.Thread:
                 pass
             time.sleep(interval)
 
+    # 幂等：桌面版入口和 serve() 都会调 start，重复起线程会让同一个
+    # 定时任务被两个循环同时触发——额度双倍消耗，结果文件互相覆盖。
+    global _thread
+    if _thread is not None and _thread.is_alive():
+        return _thread
     thread = threading.Thread(target=_loop, name="jancode-scheduler", daemon=True)
     thread.start()
+    _thread = thread
     return thread
