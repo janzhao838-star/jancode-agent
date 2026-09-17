@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import json
 from dataclasses import dataclass, field
@@ -274,6 +275,9 @@ class Client:
         raw_lines: list[str] = []
         produced = False
         finished = False
+        # 上一次「收到内容」的时刻。心跳行会把等待重置，所以不能按
+        # 「上次收到任何东西」计时，只能按「上次收到真正内容」计时。
+        last_content = 0.0
 
         async with self._http.stream(
             "POST", url, headers=self._headers(), json=payload
@@ -285,7 +289,24 @@ class Client:
                     f"{raw.decode('utf-8', 'replace')[:300]}"
                 )
 
-            async for line in resp.aiter_lines():
+            lines = resp.aiter_lines()
+            while True:
+                # 拿内容之前给足时间（推理模型可能想很久才吐第一个字），
+                # 拿到内容之后只要静默 6 秒就判定模型已经说完、主动收尾。
+                # 实测网关会把 SSE 连接多挂 20 秒都不关也不发数据，
+                # 傻等它只会让用户看到「字都显示完了还在转圈」。
+                if not produced:
+                    idle = 120.0
+                else:
+                    # 距上次内容超过 6 秒就认定说完了。用剩余时间当超时，
+                    # 这样即使网关一直在发心跳，也不会被无限重置。
+                    idle = max(0.2, 6.0 - (time.monotonic() - last_content))
+                try:
+                    line = await asyncio.wait_for(lines.__anext__(), timeout=idle)
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError:
+                    break
                 line = line.strip()
                 # SSE 里空行是分隔符，冒号开头是注释/心跳，都要跳过
                 if not line or line.startswith(":"):
@@ -309,6 +330,7 @@ class Client:
                     piece = delta.get("content") or ""
                     if piece:
                         produced = True
+                        last_content = time.monotonic()
                         yield {"type": "text", "text": piece}
 
                     # tool_calls 分片：按 index 归并，arguments 逐片拼接
@@ -324,6 +346,7 @@ class Client:
                             slot["name"] = fn["name"]
                         if fn.get("arguments"):
                             slot["arguments"] += fn["arguments"]
+                            last_content = time.monotonic()
 
                     # 模型用 finish_reason 明确说了「我说完了」。
                     # 不能等 [DONE] 或等连接关闭：实测网关会把 SSE 连接
