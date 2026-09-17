@@ -1,4 +1,4 @@
-# 一键打包 Windows 版
+﻿# 一键打包 Windows 版
 #
 # 为什么要有这个脚本：Windows 打包必须在 Windows 上做（PyInstaller 不能交叉编译），
 # 手工装环境有十几步、每步都可能踩坑。这个脚本把「装 Python、建虚拟环境、装依赖、
@@ -9,6 +9,10 @@
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $root
+
+# Windows PowerShell 5.1 默认按 ANSI 代码页读脚本，中文会乱码甚至吃掉引号。
+# 脚本本身存成 UTF-8 BOM（见文件头），控制台再设一次编码，两头都对齐。
+try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
 
 function Step($n, $text) { Write-Host ""; Write-Host "== $n. $text" -ForegroundColor Cyan }
 function Fail($text) { Write-Host "失败：$text" -ForegroundColor Red; exit 1 }
