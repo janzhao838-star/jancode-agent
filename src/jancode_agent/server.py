@@ -106,6 +106,26 @@ def save_providers(items: list[dict], active: str) -> None:
         pass
 
 
+def _env_wins(provider):
+    """JANCODE_* 环境变量设置时，让它赢过界面里存的配置。
+
+    apply_saved_settings 和 _apply_active 共用同一条优先原则：
+    脚本和 CI 里临时指定的接入方式，不能被界面存档盖掉。
+    直接读当前环境而不是「保留 config 现值」——后者只在进程启动时
+    环境变量已生效的前提下成立，运行中设置的值会漏。
+    """
+    for names, attr in (
+        (("JANCODE_API_KEY",), "api_key"),
+        (("JANCODE_BASE_URL",), "base_url"),
+        (("JANCODE_MODEL",), "model"),
+    ):
+        for n in names:
+            value = os.environ.get(n, "").strip()
+            if value:
+                provider = replace(provider, **{attr: value})
+                break
+    return provider
+
 def provider_config(config: AgentConfig, row: dict) -> AgentConfig:
     """把一套接入配置套到 config 上。"""
     provider = config.provider
@@ -136,14 +156,7 @@ def apply_saved_settings(config: AgentConfig) -> AgentConfig:
     # OPENAI_* 是通用变量，别的工具也会设（用户 shell 里就导出了一个
     # 别人的中转站地址），让它盖掉用户自己在界面里配好的地址，会变成
     # 「明明配好了却连不上」这种最难查的问题。
-    for names, attr in (
-        (("JANCODE_API_KEY",), "api_key"),
-        (("JANCODE_BASE_URL",), "base_url"),
-        (("JANCODE_MODEL",), "model"),
-    ):
-        if any(os.environ.get(n, "").strip() for n in names):
-            provider = replace(provider, **{attr: getattr(config.provider, attr)})
-    return replace(patched, provider=provider)
+    return replace(patched, provider=_env_wins(provider))
 
 
 def _index_html() -> bytes:
@@ -513,7 +526,10 @@ class Handler(BaseHTTPRequestHandler):
         if row is None:
             return
         base = Handler.config
-        Handler.config = replace(base, provider=provider_config(base, row).provider)
+        patched = replace(base, provider=provider_config(base, row).provider)
+        # JANCODE_* 环境变量必须仍然赢过界面里存的配置（apply_saved_settings
+        # 同款原则）：脚本和 CI 里临时指定的接入方式，不能被一次界面切换盖掉。
+        Handler.config = replace(patched, provider=_env_wins(patched.provider))
 
     def _edit_automation(self) -> None:
         from .library import delete_automation, upsert_automation
