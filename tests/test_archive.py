@@ -4,6 +4,7 @@
 import asyncio
 
 from jancode_agent.agent import (
+    ARCHIVE_BUDGET,
     ARCHIVE_TOOL_MAX,
     Agent,
 )
@@ -105,3 +106,40 @@ def test_主循环自动触发归档(tmp_path):
     stubs = [m for m in agent.messages if m.role == "tool" and "已自动归档" in m.content]
     assert len(stubs) >= 20, f"主循环没触发归档，桩只有 {len(stubs)} 条"
     assert steps[-1].kind == "answer"
+
+def test_用户贴的超长日志也压(tmp_path):
+    """用户贴 150KB 日志后，归档要把这条也压掉。
+
+    原先只压 tool/assistant——用户消息永不压缩，导致这条日志
+    永久留在上下文里，每轮请求都白白多发送十几万字符。
+    """
+    agent = make_agent(tmp_path)
+    big = "x" * 150_000
+    agent.messages = [Message(role="system", content="sys")]
+    for i in range(30):
+        if i == 5:
+            agent.messages.append(Message(role="user", content=big))
+        else:
+            agent.messages.append(Message(role="user", content=f"问{i}"))
+        agent.messages.append(Message(role="assistant", content=f"答{i}"))
+
+    n = agent._maybe_archive()
+    assert n == 1, f"应当恰好压掉那条日志，实际压了 {n} 条"
+    assert len(agent.messages[11].content) < 150_000, "超长用户消息没被压"
+    assert agent._context_chars() <= ARCHIVE_BUDGET, "归档后仍超预算"
+    assert "已自动归档" in agent.messages[11].content
+
+
+def test_最近窗口内的用户长消息不压(tmp_path):
+    """keep_recent 保护窗内的消息不动：模型正在处理的不能压掉。"""
+    agent = make_agent(tmp_path)
+    big = "x" * 150_000
+    agent.messages = [Message(role="system", content="sys")]
+    for i in range(6):
+        if i == 3:
+            agent.messages.append(Message(role="user", content=big))
+        else:
+            agent.messages.append(Message(role="user", content=f"问{i}"))
+        agent.messages.append(Message(role="assistant", content=f"答{i}"))
+    n = agent._maybe_archive()
+    assert n == 0, "对话太短全在保护窗内，不该压任何东西"

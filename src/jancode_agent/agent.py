@@ -123,6 +123,7 @@ ARCHIVE_KEEP_RECENT = 16
 ARCHIVE_TOOL_MAX = 600
 # 模型自己的一条回复超过这个字数才压（计划、结论保留头部的价值最大）
 ARCHIVE_ASSISTANT_MAX = 2_000
+ARCHIVE_USER_MAX = 4_000
 
 class Agent:
     """把模型、工具、循环控制拼在一起。"""
@@ -212,6 +213,16 @@ class Agent:
                 m.content = (
                     f"{head}\n…【已自动归档：这条较早的回复原文约 {omitted} 字，"
                     f"只保留开头。关键结论如需回顾，请向用户确认或重新查看相关文件。】"
+                )
+                archived += 1
+            elif m.role == "user" and len(m.content) > ARCHIVE_USER_MAX:
+                # 用户贴的超长内容（日志、报错、整份文件）也要压：
+                # 不压的话这一条永远在上下文里，每轮请求都白白多发送几十 K。
+                head = m.content[:800]
+                omitted = len(m.content)
+                m.content = (
+                    f"{head}\n…【已自动归档：这条较早的用户消息原文约 {omitted} 字，"
+                    f"只保留开头。需要时请用户重新粘贴相关段落。】"
                 )
                 archived += 1
         return archived
