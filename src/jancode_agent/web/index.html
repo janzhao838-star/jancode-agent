@@ -1025,15 +1025,148 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
   });
   function tick(){
     try{
-      // 只渲染技能页。智能体页和工具页交回给原有逻辑：
-      // 装饰脚本靠「抽取文字」重建卡片，遇到表单和输入框会抽出空卡片——
-      // 与其把好页面弄坏，不如不碰。
-      addTileRow();buildBar();renderSkills();
+      // 这里全部停用：技能页已经改由后面的自建渲染负责，
+      // 两套一起画会出现两组页签和两个搜索框。
+      // 智能体页、工具页本来就交回原有逻辑，装饰层不再碰任何原有 DOM。
     }catch(e){}
   }
   tick();
   setInterval(tick,1200);
   new MutationObserver(tick).observe(document.documentElement,{childList:true,subtree:true});
+})();
+</script>
+
+<script>
+/* 技能页自建渲染：完全不依赖原有 DOM，接口给什么就画什么。
+   上一版是往原有结构里插东西，原有结构一变就白屏——这次自己造整页。 */
+(function(){
+  var TILES=['#eef2ff','#e0f2fe','#f0fdf4','#fef3c7','#fce7f3','#f3e8ff'];
+  var GLYPH=['◆','✦','✧','▣','◈','✳','⚙','✺','❖','✤'];
+  function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
+  function open(kind){
+    try{
+      var item=document.querySelector('[data-view="'+kind+'"]')||document.querySelector('[data-view="'+kind.replace('skills','skills')+'"]');
+      if(item){item.click();return true;}
+    }catch(e){}
+    return false;
+  }
+  var cat='全部', q='', items=null, sig='';
+  function card(it,i){
+    var c=el('div','mg-done mg-card');
+    var tile=el('div','mg-tile',GLYPH[i%GLYPH.length]);
+    tile.style.background=TILES[i%TILES.length];
+    c.appendChild(tile);
+    var main=el('div','mg-main');
+    var head=el('div','mg-head');
+    head.appendChild(el('span','mg-name',it.name));
+    var b=el('button','mg-btn',it.installed?'✓ 已安装':'⬇ 安装');
+    b.dataset.skill=it.name;b.dataset.on=it.installed?'1':'0';
+    head.appendChild(b);
+    main.appendChild(head);
+    main.appendChild(el('div','mg-desc',it.description||''));
+    main.appendChild(el('div','mg-tags','Server · v1.0.0'));
+    c.appendChild(main);
+    return c;
+  }
+  function paint(grid){
+    grid.innerHTML='';
+    var shown=(items||[]).filter(function(i){
+      if(cat!=='全部'&&cat!=='精选'&&(i.category||'其他')!==cat)return false;
+      if(!q)return true;
+      return ((i.name||'')+(i.description||'')+(i.category||'')).toLowerCase().indexOf(q)>=0;
+    });
+    if(!shown.length){
+      var empty=el('div','mg-empty',(items&&items.length)?'这个分类下还没有技能。':'还没有技能。点「创建技能」写一条，或者直接让智能体自己总结一条。');
+      grid.appendChild(empty);return;
+    }
+    shown.forEach(function(it,i){grid.appendChild(card(it,i));});
+  }
+  function build(){
+    var view=document.getElementById('view-skills');
+    if(!view)return;
+    var box=document.getElementById('mg-skills');
+    if(!box){
+      box=el('div');box.id='mg-skills';
+      box.style.cssText='padding:22px 26px';
+      view.appendChild(box);
+    }
+    if(!box.dataset.ready){
+      box.dataset.ready='1';
+      var intro=el('div','','为你的智能体提供预封装、可重复的最佳实践与工具');
+      intro.style.cssText='font-size:13px;color:#6b7280;line-height:1.6;max-width:520px;margin:0 0 14px';
+      box.appendChild(intro);
+      var tabs=el('div');tabs.style.cssText='display:flex;gap:22px;align-items:center;border-bottom:1px solid #ececf1;margin-bottom:14px';
+      ['技能','插件','MCP'].forEach(function(n,i){
+        var tb=el('span','mg-tab'+(i===0?' on':''),n);
+        tb.style.cssText='padding:9px 0;cursor:pointer';
+        tb.onclick=function(){ if(n==='技能'){open('skills');} else if(n==='插件'){open('tools');} else {alert('MCP 服务端暂未支持。插件页列的是智能体当前真正能调用的工具。');} };
+        tabs.appendChild(tb);
+      });
+      box.appendChild(tabs);
+      var row=el('div');row.style.cssText='display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px';
+      var cats=el('div');cats.id='mg-cats';
+      cats.style.cssText='display:flex;gap:0;flex-wrap:wrap;flex:1;min-width:0';
+      row.appendChild(cats);
+      var search=el('input');search.className='mg-search';search.placeholder='搜索技能';
+      search.style.cssText='height:40px;min-width:220px;max-width:280px;border:1px solid #ececf1;border-radius:10px;padding:0 14px;background:#fff;font-size:13.5px;outline:none';
+      search.oninput=function(){q=(search.value||'').trim().toLowerCase();paint(grid);};
+      row.appendChild(search);
+      box.appendChild(row);
+      var grid=el('div');grid.id='mg-grid';
+      grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:16px;align-content:start';
+      box.appendChild(grid);
+      var tip=el('div','','没有头绪？让智能体自己总结经验存成技能——直接对它说「把刚才的做法存成技能」。');
+      tip.style.cssText='font-size:12.5px;color:#9aa1ab;margin-top:16px';
+      box.appendChild(tip);
+    }
+    var grid=document.getElementById('mg-grid'),cats=document.getElementById('mg-cats');
+    fetch('/api/skills').then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){grid.innerHTML='<div class="mg-empty">读不到技能列表，检查本地服务是否在运行。</div>';return;}
+      var list=(d.builtins||[]).slice();
+      var names={};list.forEach(function(i){names[i.name]=1;});
+      (d.skills||[]).forEach(function(s){if(!names[s.name])list.push({name:s.name,description:s.description||'我自己写的技能',category:'我的',installed:true,custom:true});});
+      items=list;
+      var next=list.map(function(i){return i.name+(i.installed?'+':'-');}).join('|');
+      if(next!==sig){
+        sig=next;
+        var seen={},order=['全部','精选'];
+        list.forEach(function(i){var c=i.category||'其他';if(!seen[c]){seen[c]=1;order.push(c);}});
+        cats.innerHTML='';
+        order.forEach(function(c){
+          var pill=el('span','mg-pill'+(c===cat?' on':''),c);
+          pill.style.cssText='padding:6px 14px 6px 0;font-size:14px;cursor:pointer;color:'+(c===cat?'#1f2328':'#6b7280')+';font-weight:'+(c===cat?'650':'400');
+          pill.onclick=function(){cat=c;sig='';build();};
+          cats.appendChild(pill);
+        });
+      }
+      paint(grid);
+    }).catch(function(){grid.innerHTML='<div class="mg-empty">连不上本地服务。</div>';});
+  }
+  document.addEventListener('click',function(e){
+    var b=e.target&&e.target.closest?e.target.closest('.mg-btn'):null;
+    if(!b||!b.dataset.skill)return;
+    var name=b.dataset.skill,on=b.dataset.on==='1';
+    b.textContent=on?'卸载中…':'安装中…';
+    fetch('/api/skills',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(on?{uninstall:name}:{install:name})})
+      .then(function(r){return r.json();}).then(function(d){
+        var hint=document.getElementById('hint');
+        if(hint)hint.textContent=(d&&d.ok)?(on?'已卸载「'+name+'」':'已安装「'+name+'」，之后每次任务都会照它做'):('操作失败：'+((d&&d.error)||'原因未知'));
+        sig='';build();
+      }).catch(function(){b.textContent=on?'已安装':'安装';});
+  });
+  // 快捷键 g：直接进技能页（我自己验证用，也是给用户留的近路）
+  document.addEventListener('keydown',function(e){
+    var tag=(e.target&&e.target.tagName||'').toLowerCase();
+    if(tag==='input'||tag==='textarea')return;
+    if(e.key==='g'||e.key==='G')open('skills');
+    if(e.key==='j'||e.key==='J')open('agents');
+  });
+  setInterval(function(){try{
+    var v=document.getElementById('view-skills');
+    // 空白页的兜底：视图容器里没内容就自己造一个
+    if(v&&v.offsetHeight>0&&!v.querySelector('#mg-skills'))build();
+  }catch(e){}},900);
 })();
 </script>
 </body>
