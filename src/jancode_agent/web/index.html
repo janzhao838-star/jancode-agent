@@ -1610,7 +1610,7 @@ main,.main,#main{overflow:hidden}
       if(a.last_result){var res=el('div',null,a.last_result.slice(0,120));res.style.cssText='font-size:12.5px;color:#6b7280;margin-top:6px';left.appendChild(res);}
       it.appendChild(left);
       var b1=el('button','btn','立即运行');
-      b1.onclick=function(){b1.textContent='运行中…';runTask(a.prompt,''.jancode-runs/'+encodeURIComponent(a.name)+'.md').then(function(out){b1.textContent='立即运行';tip.textContent='已完成，结果记在任务下面';load();});};
+      b1.onclick=function(){b1.textContent='运行中…';runTask(a.prompt,'.jancode-runs/'+encodeURIComponent(a.name)+'.md').then(function(out){b1.textContent='立即运行';tip.textContent='已完成，结果记在任务下面';load();});};
       var b2=el('button','btn',a.enabled?'停用':'启用');
       b2.onclick=function(){post('/api/automations',{name:a.name,prompt:a.prompt,schedule:a.schedule,enabled:!a.enabled}).then(load);};
       var b3=el('button','btn','删除');
@@ -2159,9 +2159,8 @@ main,.main,#main{overflow:hidden}
     // 运行中把发送按钮恢复成「发送」，并提示可以插话（消息会排队）。
     // 否则按钮停在「执行中…」，用户根本不会去点。
     var sb=document.getElementById('send');
-    if(sb&&(sb.textContent||'').indexOf('执行中')>=0&&!sb.dataset.mgFixed){
-      sb.textContent='发送（可插话）';sb.dataset.mgFixed='1';
-      sb.addEventListener('blur',function(){delete sb.dataset.mgFixed;});
+    if(sb&&(sb.textContent||'').indexOf('执行中')>=0){
+      sb.textContent='发送（可插话）';   // 运行中也点得动：消息会排队，不打断当前这轮
     }
   },400);
   var orig=window.fetch;
@@ -2307,75 +2306,7 @@ main,.main,#main{overflow:hidden}
 })();
 </script>
 
-<script>
-/* 独立的「插话」输入框。
-   前几版都在解禁它原有的输入与发送，但它的 busy/live 状态是闭包里的，
-   外部改不动，表现始终是一问一答。这一版不再依赖它的内部状态：
-   自己发自己的请求、自己渲染自己的回答，一定能用。 */
-(function(){
-  var log = null;
-  function el(tag, text){var e=document.createElement(tag); if(text!=null) e.textContent=text; return e;}
-  function getLog(){ if(!log||!document.body.contains(log)) log=document.getElementById('log'); return log; }
-  function bubble(text, mine){
-    var L=getLog(); if(!L) return null;
-    var d=el('div'); d.style.cssText = mine
-      ? 'margin:8px 0;padding:10px 13px;background:#f3f0ff;border:1px solid #e4dcff;border-radius:11px;white-space:pre-wrap;font-size:13.5px;line-height:1.65;color:#33336b'
-      : 'margin:8px 0;padding:10px 13px;background:#fff;border:1px solid #eee;border-radius:11px;white-space:pre-wrap;font-size:13.5px;line-height:1.65;color:#2f333a';
-    d.textContent = text; L.appendChild(d); L.scrollTop = L.scrollHeight; return d;
-  }
-  function sendMsg(text){
-    text=(text||'').trim(); if(!text) return;
-    bubble('我（插话）：'+text, true);
-    var node=bubble('…', false);
-    var acc='';
-    fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({prompt:text, history:[]})})
-    .then(function(res){
-      if(!res.ok) throw new Error('服务返回 '+res.status);
-      var reader=res.body.getReader(), dec=new TextDecoder(), buf='';
-      function pump(){
-        return reader.read().then(function(r){
-          if(r.done){ node.textContent=acc||'（没有返回内容）'; return; }
-          buf+=dec.decode(r.value,{stream:true});
-          var lines=buf.split('\n'); buf=lines.pop();
-          lines.forEach(function(s){
-            if(!s.trim()) return;
-            var ev; try{ ev=JSON.parse(s); }catch(e){ return; }
-            if(ev.kind==='answer'&&!ev.subagent){ acc+=ev.text; }
-            else if(ev.kind==='tool'&&ev.tool){ acc+=''; node.textContent=acc+'\n（正在用 '+ev.tool+'…）'; }
-            else if(ev.kind==='error'){ acc+='\n[错误] '+ev.text; }
-            node.textContent=acc; if(log) log.scrollTop=log.scrollHeight;
-          });
-          return pump();
-        });
-      }
-      return pump();
-    })
-    .catch(function(e){ node.textContent='插话发送失败：'+e; });
-  }
-  function install(){
-    var send=document.getElementById('send');
-    if(!send||document.getElementById('mg-interject')) return;
-    var wrap=el('div'); wrap.id='mg-interject';
-    // 用固定定位浮在窗口底部：之前插进文档流里会被布局挤成 0 高度，
-    // 界面上完全看不到，功能等于没有。浮层不受任何布局影响。
-    wrap.style.cssText='position:fixed;left:14px;right:14px;bottom:104px;z-index:9997;display:flex;gap:8px;align-items:flex-end;background:rgba(255,255,255,.97);border:1px solid #e4e0ff;border-radius:12px;padding:7px;box-shadow:0 6px 22px rgba(30,20,80,.10)';
-    var ta=el('textarea'); ta.id='mg-interject-input';
-    ta.placeholder='插话：运行中也能发（回车发送，Shift+回车换行），不会打断当前这轮';
-    ta.style.cssText='flex:1;height:36px;resize:none;border:1px solid #e6e6ee;border-radius:10px;padding:8px 11px;font-size:13px;font-family:inherit;outline:none';
-    var b=el('button','插话发送');
-    b.style.cssText='height:36px;padding:0 15px;border:1px solid #d9d2ff;border-radius:10px;background:#f7f5ff;color:#5b3ee8;cursor:pointer;font-size:13px';
-    b.onclick=function(){ sendMsg(ta.value); ta.value=''; };
-    ta.onkeydown=function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); b.onclick(); } };
-    wrap.appendChild(ta); wrap.appendChild(b);
-    // 必须插在输入框上方、占满整行。
-    // 上一版插在 #send 后面（底部那一行的右边），被挤得看不见，所以
-    // 用户压根找不到这个框——功能是对的，位置错了等于没有。
-    document.body.appendChild(wrap);
-  }
-  setInterval(function(){ try{ install(); }catch(e){} }, 900);
-})();
-</script>
+
 </body>
 </html>
 
