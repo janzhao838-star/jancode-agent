@@ -65,11 +65,26 @@ Step 5 "打包"
 if ($LASTEXITCODE -ne 0) { Fail "打包失败（看上面的报错）" }
 
 Step 6 "压缩产物"
-$out = Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*JanCode*" } | Select-Object -First 1
-if (-not $out) { Fail "dist 里没找到打包结果" }
+# onefile 模式出来的是单个 exe，onedir 模式才是目录。
+# 之前只找目录，onefile 的产物明明打好了却报「没找到」。
+$target = $null
+$dir = Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*JanCode*" } | Select-Object -First 1
+if ($dir) {
+    $target = $dir.FullName
+    Write-Host "打包目录：$target"
+} else {
+    $exe = Get-ChildItem dist -File -Filter "*.exe" | Select-Object -First 1
+    if ($exe) {
+        $target = $exe.FullName
+        Write-Host ("打包文件：" + $target + "（" + [math]::Round($exe.Length / 1MB, 1) + " MB）") -ForegroundColor Green
+    }
+}
+if (-not $target) { Fail "dist 里既没有目录也没有 exe，看看上面 PyInstaller 的报错" }
+
 $zip = "dist\JanCode-Agent-windows-x64.zip"
 if (Test-Path $zip) { Remove-Item $zip }
-Compress-Archive -Path $out.FullName -DestinationPath $zip -Force
+Compress-Archive -Path $target -DestinationPath $zip -Force
+Write-Host ("压缩包：" + $zip + "（" + [math]::Round((Get-Item $zip).Length / 1MB, 1) + " MB）") -ForegroundColor Green
 
 Write-Host ""
 Write-Host "完成！产物：$zip" -ForegroundColor Green
