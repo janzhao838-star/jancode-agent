@@ -96,6 +96,41 @@ def _parser() -> argparse.ArgumentParser:
     return p
 
 
+def _tool_roundtrip(workspace: Path) -> None:
+    """自检：把工具层真跑一遍。
+
+    写 → 读 → 改 → 查 → bash 五步全部走 Toolbox.call() 完整分发，
+    任何一步结果不对都抛异常，让 selftest 以非零退出。打包后的
+    PyInstaller 环境里工具层是最容易「装完才发现坏了」的一层。
+    """
+    import asyncio
+    import tempfile
+
+    from .tools import Toolbox
+
+    async def run() -> None:
+        with tempfile.TemporaryDirectory(dir=workspace) as tmp:
+            box = Toolbox(workspace=Path(tmp))
+
+            rel = "自检.txt"
+            r = await box.call("write_file", {"path": rel, "content": "第一行\n第二行"})
+            assert r.ok, f"write_file 失败：{r.output}"
+
+            r = await box.call("read_file", {"path": rel})
+            assert r.ok and "第二行" in r.output, f"read_file 失败：{r.output}"
+
+            r = await box.call("edit_file", {"path": rel, "old": "第二行", "new": "改过的行"})
+            assert r.ok, f"edit_file 失败：{r.output}"
+
+            r = await box.call("grep", {"pattern": "改过的行", "path": "."})
+            assert r.ok and "自检.txt" in r.output, f"grep 失败：{r.output}"
+
+            r = await box.call("bash", {"command": "echo 往返正常"})
+            assert r.ok and "往返正常" in r.output, f"bash 失败：{r.output}"
+
+    asyncio.run(run())
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
 
@@ -150,6 +185,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"服务已就绪：{url}", flush=True)
         print(f"工作目录 {config.workspace}", flush=True)
         print(f"模型 {config.provider.model} @ {config.provider.base_url}", flush=True)
+        # 工具调用往返：打包后的 app（PyInstaller 冻结环境）里，
+        # 工具层是除了 HTTP 服务之外最容易「装完才发现坏了」的一层——
+        # 比如资源路径变了、asyncio 策略不同。在这里真跑一遍写读改查。
+        try:
+            _tool_roundtrip(config.workspace)
+        except Exception as exc:
+            httpd.shutdown()
+            httpd.server_close()
+            return _fail(f"自检工具往返失败：{exc}", alert=False)
+        print("工具往返 write/read/edit/grep/bash 全部通过。", flush=True)
         print("桌面版自检通过。", flush=True)
         httpd.shutdown()
         httpd.server_close()
