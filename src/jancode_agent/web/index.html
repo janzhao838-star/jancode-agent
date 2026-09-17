@@ -1942,12 +1942,13 @@ main,.main,#main{overflow:hidden}
 </script>
 
 <script>
-/* 速度／推理强度：档位跟着模型走。
-   中转站的模型清单里没有能力字段，所以档位由后端按模型家族判断后下发；
-   模型不支持调节时，这个选择器直接隐藏，请求里也不带该字段
-   （硬塞给不支持的模型会被 provider 拒绝）。 */
+/* 速度／推理强度：固定四档（默认/低/高/最大），任何模型都显示。
+   选「默认」时请求不带字段，任何模型都安全；选了具体档位时，
+   后端会按模型能力收敛（只支持开/关的模型按「开」处理），真不认的
+   网关返回 400 时也会自动去掉档位重发。所以这里放心把选项全部摆出来，
+   不再凭模型名隐藏选择器——隐藏会让用户以为功能丢了。 */
 (function(){
-  var LABEL={low:'快速',medium:'均衡',high:'深度思考'};
+  var LABEL={default:'默认',low:'低',high:'高',max:'最大'};
   var efforts={}, current='';
   function currentModel(){
     var btn=document.getElementById('modelBtn')||document.getElementById('mpick');
@@ -1958,21 +1959,20 @@ main,.main,#main{overflow:hidden}
     var sel=document.getElementById('mg-effort');
     if(!sel)return;
     var m=currentModel();
-    var levels=efforts[m]||[];
-    if(m===current&&sel.dataset.built===levels.join(','))return;
-    current=m;sel.dataset.built=levels.join(',');
-    sel.innerHTML='';
-    if(!levels.length){sel.style.display='none';sel.value='';return;}
-    sel.style.display='';
-    var o=document.createElement('option');o.value='';o.textContent='默认速度';sel.appendChild(o);
-    levels.forEach(function(l){var x=document.createElement('option');x.value=l;x.textContent=LABEL[l]||l;sel.appendChild(x);});
+    if(m===current)return;
+    current=m;
+    sel.title='推理速度：越深越慢但更准。当前模型：'+(m||'未知')+
+      (efforts[m]&&efforts[m].length?'':'（模型能力未知，将自动适配）');
   }
   function inject(){
     var btn=document.getElementById('modelBtn')||document.getElementById('mpick');
     if(!btn||document.getElementById('mg-effort'))return;
     var sel=document.createElement('select');
-    sel.id='mg-effort';sel.title='推理强度：越深越慢但更准；档位由模型决定';
-    sel.style.cssText='height:32px;border:1px solid #ececf1;border-radius:8px;padding:0 8px;font-size:12.5px;background:#fff;color:#4b5563;margin-left:8px;cursor:pointer;display:none';
+    sel.id='mg-effort';sel.title='推理速度：越深越慢但更准';
+    sel.style.cssText='height:32px;border:1px solid #ececf1;border-radius:8px;padding:0 8px;font-size:12.5px;background:#fff;color:#4b5563;margin-left:8px;cursor:pointer';
+    ['default','low','high','max'].forEach(function(l){
+      var x=document.createElement('option');x.value=l==='default'?'':l;x.textContent=LABEL[l]||l;sel.appendChild(x);
+    });
     btn.parentNode.insertBefore(sel,btn.nextSibling);
     fetch('/api/models').then(function(r){return r.json();}).then(function(d){efforts=d.efforts||{};rebuild();});
   }

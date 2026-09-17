@@ -21,6 +21,7 @@ from typing import Any
 import httpx
 
 from .config import ProviderConfig
+from .efforts import effective_effort
 
 
 class ProviderError(RuntimeError):
@@ -198,6 +199,16 @@ class Client:
                     break
                 await asyncio.sleep(wait)
                 resp = await self._http.post(url, headers=self._headers(), json=payload)
+            # 推理档位的最后兜底：模型不认 reasoning_effort 时有些网关会
+            # 直接 400。报错里提到这个字段就说明是档位引起的——去掉它
+            # 重发一次（等于按默认推理强度跑），别让用户卡在报错上。
+            # 只重试一次，且仅当确实带过该字段。
+            if resp.status_code == 400 and self._effort():
+                body_head = resp.text[:600].lower()
+                if "reasoning" in body_head or "effort" in body_head:
+                    payload = {k: v for k, v in payload.items() if k != "reasoning_effort"}
+                    payload.pop("reasoning", None)
+                    resp = await self._http.post(url, headers=self._headers(), json=payload)
         except httpx.HTTPError as exc:
             raise ProviderError(f"连接 {url} 失败：{exc}") from exc
 
@@ -291,10 +302,29 @@ class Client:
         try:
             if resp.status_code >= 400:
                 raw = await resp.aread()
-                raise ProviderError(
-                    f"{url} 返回 {resp.status_code}："
-                    f"{raw.decode('utf-8', 'replace')[:300]}"
-                )
+                raw_text = raw.decode('utf-8', 'replace')
+                # 与一次性请求同一套兜底：档位引起的 400 就去掉字段重发，
+                # 别让「选了个推理档位」变成整轮对话失败。
+                if resp.status_code == 400 and self._effort() and (
+                    "reasoning" in raw_text[:600].lower() or "effort" in raw_text[:600].lower()
+                ):
+                    await resp.aclose()
+                    payload = {k: v for k, v in payload.items() if k != "reasoning_effort"}
+                    payload.pop("reasoning", None)
+                    request = self._http.build_request(
+                        "POST", url, headers=self._headers(), json=payload
+                    )
+                    resp = await self._http.send(request, stream=True)
+                    if resp.status_code >= 400:
+                        raw = await resp.aread()
+                        raise ProviderError(
+                            f"{url} 返回 {resp.status_code}："
+                            f"{raw.decode('utf-8', 'replace')[:300]}"
+                        )
+                else:
+                    raise ProviderError(
+                        f"{url} 返回 {resp.status_code}：{raw_text[:300]}"
+                    )
 
             lines = resp.aiter_lines()
             while True:
@@ -435,6 +465,15 @@ class Client:
                 if text:
                     yield text
 
+    def _effort(self) -> str:
+        """发送前把界面档位收敛成本模型真正支持的值。
+
+        界面固定给默认/低/高/最大四档，但模型能力参差：只支持开/关的
+        模型（deepseek-v4、glm-5 系）选什么都收敛成 high；选「默认」
+        或不支持时返回空——不带字段，任何模型都安全。
+        """
+        return effective_effort(self.provider.model, getattr(self.provider, "effort", ""))
+
     def _chat_payload(self, messages: list[Message], tools: list[dict[str, Any]] | None) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self.provider.model,
@@ -442,14 +481,14 @@ class Client:
             "temperature": self.provider.temperature,
         }
         if tools:
-            if getattr(self.provider, "effort", ""):
-                payload["reasoning"] = {"effort": self.provider.effort}
+            if self._effort():
+                payload["reasoning"] = {"effort": self._effort()}
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
         # 推理强度：只有用户选了才发，空着就用服务端默认。
         # 不要在没选的时候硬塞一个值——不支持的模型收到会直接报错。
-        if getattr(self.provider, "effort", ""):
-            payload["reasoning_effort"] = self.provider.effort
+        if self._effort():
+            payload["reasoning_effort"] = self._effort()
         return payload
 
     def _responses_payload(self, messages: list[Message], tools: list[dict[str, Any]] | None) -> dict[str, Any]:
