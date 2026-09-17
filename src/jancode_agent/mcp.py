@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import threading
 import time
@@ -82,9 +83,19 @@ class MCPClient:
     def start(self) -> None:
         env = dict(os.environ)
         env.update(self.env)
+
+        # Windows 上 npx / npm 是 .cmd 批处理文件，CreateProcess 不能直接执行，
+        # 会报「不是有效的 Win32 应用程序」。必须用 cmd /c 包一层。
+        command, args = self.command, list(self.args)
+        if os.name == "nt":
+            found = (shutil.which(command) or "").lower()
+            if found.endswith((".cmd", ".bat")) or command in ("npx", "npm", "pnpm"):
+                args = ["/c", command] + args
+                command = "cmd"
+
         try:
             self.proc = subprocess.Popen(
-                [self.command, *self.args],
+                [command, *args],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, text=True, bufsize=1, env=env)
         except FileNotFoundError as exc:

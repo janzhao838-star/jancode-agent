@@ -1578,7 +1578,7 @@ main,.main,#main{overflow:hidden}
       if(a.last_result){var res=el('div',null,a.last_result.slice(0,120));res.style.cssText='font-size:12.5px;color:#6b7280;margin-top:6px';left.appendChild(res);}
       it.appendChild(left);
       var b1=el('button','btn','立即运行');
-      b1.onclick=function(){b1.textContent='运行中…';runTask(a.prompt,'/tmp/jancode-auto-'+encodeURIComponent(a.name)+'.md').then(function(out){b1.textContent='立即运行';tip.textContent='已完成，结果记在任务下面';load();});};
+      b1.onclick=function(){b1.textContent='运行中…';runTask(a.prompt,''.jancode-runs/'+encodeURIComponent(a.name)+'.md').then(function(out){b1.textContent='立即运行';tip.textContent='已完成，结果记在任务下面';load();});};
       var b2=el('button','btn',a.enabled?'停用':'启用');
       b2.onclick=function(){post('/api/automations',{name:a.name,prompt:a.prompt,schedule:a.schedule,enabled:!a.enabled}).then(load);};
       var b3=el('button','btn','删除');
@@ -1610,7 +1610,7 @@ main,.main,#main{overflow:hidden}
       var p=box.querySelector('#mg-a-prompt').value.trim();
       if(!p){tip.textContent='先写清楚要做什么';return;}
       tip.textContent='正在运行…（会真的执行，可能要一会儿）';
-      runTask(p,'/tmp/jancode-auto-preview.md').then(function(){tip.textContent='这次执行已完成';});
+      runTask(p,'.jancode-runs/预览结果.md').then(function(){tip.textContent='这次执行已完成';});
     };
   }
   function load(){fetch('/api/automations').then(function(r){return r.json();}).then(render).catch(function(){});}

@@ -614,7 +614,6 @@ class Handler(BaseHTTPRequestHandler):
         # 看着像「配置丢了」。所以：当前地址能拉到的 + 配过的 + 内置目录，全并进来。
         try:
             from .catalog import CATALOG
-            from .library import _load_json  # noqa: F401  (占位，见下)
 
             rows, _active = load_providers()
             for row in rows:
