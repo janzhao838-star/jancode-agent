@@ -16,6 +16,7 @@ import asyncio
 import os
 import re
 import shutil
+import signal
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -386,6 +387,8 @@ class Toolbox:
             if danger in lowered:
                 return ToolResult(False, f"命令包含危险操作 {danger!r}，已拒绝执行。")
 
+        # 独立进程组：超时杀的是整组，而不是只杀 shell 把它启动的
+        # 孙子进程（sleep、编译器……）留在系统里。
         try:
             proc = await asyncio.create_subprocess_shell(
                 command,
@@ -393,18 +396,52 @@ class Toolbox:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                start_new_session=True,
             )
         except OSError as exc:
             return ToolResult(False, f"无法启动命令：{exc}")
 
-        try:
-            out, _ = await asyncio.wait_for(proc.communicate(), timeout=self.bash_timeout)
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
-            return ToolResult(False, f"命令超时（{self.bash_timeout} 秒）已被终止：{command}")
+        # 输出用读任务持续收集，而不是 communicate 一锤子买卖：
+        # 超时杀进程时，已经产出的部分输出还能带回来给模型看。
+        chunks: list[bytes] = []
 
-        text = (out or b"").decode("utf-8", errors="replace")
+        async def _pump() -> None:
+            assert proc.stdout
+            while True:
+                block = await proc.stdout.read(65536)
+                if not block:
+                    break
+                chunks.append(block)
+
+        pump = asyncio.ensure_future(_pump())
+        try:
+            await asyncio.wait_for(asyncio.shield(pump), timeout=self.bash_timeout)
+        except asyncio.TimeoutError:
+            # 杀整组进程，别把 shell 的孙子们留在系统里。
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, AttributeError):
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            try:
+                await asyncio.wait_for(pump, timeout=10)
+            except Exception:
+                pump.cancel()
+            try:
+                await proc.wait()
+            except Exception:
+                pass
+            partial = b"".join(chunks).decode("utf-8", errors="replace")
+            note = f"命令超时（{self.bash_timeout} 秒）已被终止：{command}"
+            if partial.strip():
+                return ToolResult(False, note + "\n终止前的部分输出：\n" + self._clip(partial))
+            return ToolResult(False, note)
+
+        await pump
+        await proc.wait()
+        text = b"".join(chunks).decode("utf-8", errors="replace")
         code = proc.returncode or 0
         if code != 0:
             return ToolResult(False, f"命令退出码 {code}：\n{self._clip(text)}")
