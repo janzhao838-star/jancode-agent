@@ -292,6 +292,13 @@ class Agent:
                 # 否则就以已经收到的为准（否则用户会看到重复内容）。
                 reply = Reply(content=streamed) if streamed else None
 
+            if reply is None and streamed:
+                # 纯文本回答：流式里已经收全了，直接当成这一轮的回复。
+                # 少了这一步，下面会再发一次完整请求去拿同样的内容——
+                # 用户明明已经看到答案了，却还要白等一次往返，
+                # 顺带白占一次网关配额（按机器限并发时尤其明显）。
+                reply = Reply(content=streamed)
+
             if reply is None:
                 try:
                     reply = await self._client.complete(self.messages, specs)
