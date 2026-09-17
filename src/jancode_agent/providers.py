@@ -308,13 +308,22 @@ class Client:
                 else:
                     # 已经吐过内容了，判断话是不是说完了：
                     # 以句末标点/换行收尾的，静默 2.5 秒就认定说完；
-                    # 看不出收尾的给足 15 秒，避免把半句话截断。
-                    # 用「剩余时间」当超时，这样网关一直发心跳也不能无限重置。
+                    # 看不出收尾也只等 5 秒——实测应用路径下网关在最后
+                    # 一个内容之后要拖约 9 秒才发 finish_reason
+                    # （直连只有 0.13 秒，是整套工具让它变慢的），
+                    # 而文字这时已经全部送到用户眼前了。
                     looks_done = buf.rstrip().endswith(
                         ("。", "！", "？", "…", ".", "!", "?", chr(10), chr(34), "”", "`")
                     )
-                    limit = 2.5 if looks_done else 15.0
-                    idle = max(0.2, limit - (time.monotonic() - last_content))
+                    limit = 2.5 if looks_done else 5.0
+                    elapsed = time.monotonic() - last_content
+                    # 必须在这里显式判断，不能只靠 wait_for 超时：
+                    # 网关会持续发心跳、推理内容这类「不算内容」的行，
+                    # 每次都能让等待立刻返回，超时永远轮不到。
+                    if elapsed > limit:
+                        break
+                    # 最多等 1 秒就回来重新判断一次
+                    idle = min(1.0, max(0.2, limit - elapsed))
                 try:
                     line = await asyncio.wait_for(lines.__anext__(), timeout=idle)
                 except StopAsyncIteration:
