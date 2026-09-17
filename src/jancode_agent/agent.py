@@ -277,7 +277,14 @@ class Agent:
         answer, failure = "", ""
         async for step in child.run(prompt):
             if step.kind == "answer":
-                answer = step.text
+                if step.delta:
+                    # 流式分片：拼起来。覆盖式赋值的话，最后一片会把
+                    # 前面全丢掉；收尾的空 delta（text=""）会把结论清空，
+                    # 主智能体就只能看到「子智能体没有给出结论」。
+                    answer += step.text
+                elif step.text:
+                    answer = step.text
+                # text 为空且非 delta 的是「输入中」结束标记，跳过
             elif step.kind == "error":
                 failure = step.text
             self._emit_sub_step(step, label)
