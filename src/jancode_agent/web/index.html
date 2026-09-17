@@ -1440,6 +1440,168 @@ main,.main,#main{overflow:hidden}
   });
 })();
 </script>
+
+<style>
+#mg-auto{padding:22px 26px 60px}
+#mg-auto .hero{background:#f8f8f9;border-radius:14px;padding:18px 20px;margin-bottom:16px}
+#mg-auto .hero h3{margin:0 0 6px;font-size:17px}
+#mg-auto .hero p{margin:0;font-size:13px;color:#6b7280;line-height:1.6}
+#mg-auto .row{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+#mg-auto input{height:38px;border:1px solid #ececf1;border-radius:9px;padding:0 11px;font-size:13.5px;background:#fff;flex:1;min-width:0}
+#mg-auto .item{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid #ececf1;border-radius:12px;padding:14px 16px;margin-bottom:10px}
+#mg-auto .btn{height:32px;padding:0 13px;border-radius:8px;border:1px solid #e3e3e8;background:#fff;font-size:13px;cursor:pointer;color:#4b5563}
+#mg-auto .btn:hover{border-color:#c9b8ff;color:#5b3ee8}
+#mg-auto .go{background:linear-gradient(135deg,#7c5cff,#35c3e8);color:#fff;border:none}
+#mg-auto .sc{display:inline-block;font-size:12.5px;color:#5b3ee8;background:#f2f0ff;border-radius:99px;padding:5px 12px;margin:0 8px 8px 0;cursor:pointer}
+#view-automations{overflow-y:auto!important;min-height:0!important;display:none}
+</style>
+<script>
+/* 自动化页：后端（定时调度 + 立即运行）早就做好了，这里补界面。
+   自己造整页和侧栏入口，不动原有 DOM。 */
+(function(){
+  var TILES=['#eef2ff','#e0f2fe','#f0fdf4','#fef3c7'];
+  function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
+  function post(path,body){return fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();});}
+  var view=null;
+  function ensureView(){
+    if(view)return view;
+    view=document.getElementById('view-automations');
+    if(!view){
+      view=el('div','view');view.id='view-automations';
+      var host=document.getElementById('view-chat');
+      (host&&host.parentNode?host.parentNode:document.body).appendChild(view);
+    }
+    return view;
+  }
+  function ensureNav(){
+    if(document.getElementById('mg-nav-auto'))return;
+    var items=document.querySelectorAll('[data-view]');
+    var last=items[items.length-1];
+    if(!last)return;
+    var nav=last.cloneNode(true);
+    nav.id='mg-nav-auto';
+    nav.setAttribute('data-view','automations');
+    nav.classList.remove('active','on');
+    nav.textContent='自动化';
+    var svg=last.querySelector('svg');
+    if(svg)nav.insertBefore(svg.cloneNode(true),nav.firstChild);
+    last.parentNode.insertBefore(nav,last.nextSibling);
+    nav.onclick=function(e){
+      e.preventDefault();e.stopPropagation();
+      document.querySelectorAll('.view').forEach(function(v){v.style.display='none';});
+      document.querySelectorAll('[data-view]').forEach(function(i){if(i.id!=='mg-nav-auto')i.classList.remove('active','on');});
+      nav.classList.add('active');
+      ensureView().style.display='block';
+      load();
+    };
+    document.querySelectorAll('[data-view]').forEach(function(i){
+      if(i.id==='mg-nav-auto')return;
+      i.addEventListener('click',function(){ if(view)view.style.display='none'; });
+    });
+  }
+  function render(d){
+    var box=ensureView();
+    box.innerHTML='';
+    var wrap=el('div');wrap.id='mg-auto';
+    var hero=el('div','hero');
+    hero.appendChild(el('h3',null,'一句话创建自动化任务'));
+    hero.appendChild(el('p',null,'说清要做什么和什么时候做，智能体自己拆解执行。到点由本机调度器触发，不需要开着界面。执行结果会记在任务下面。'));
+    wrap.appendChild(hero);
+
+    var form=el('div');
+    form.appendChild(el('div',null,'新建任务')).style.cssText='font-size:14px;font-weight:600;margin:6px 0 10px';
+    var r1=el('div','row');
+    var name=el('input');name.placeholder='任务名字，例如「每日竞品价格」';name.id='mg-a-name';
+    r1.appendChild(name);form.appendChild(r1);
+    var r2=el('div','row');
+    var prompt=el('input');prompt.placeholder='要做什么：例如「抓取这三个商品页的价格并和昨天对比」';prompt.id='mg-a-prompt';
+    r2.appendChild(prompt);form.appendChild(r2);
+    var r3=el('div','row');
+    var sched=el('input');sched.placeholder='什么时候做：每 30 分钟 / 每小时 / 每天 09:00';sched.id='mg-a-sched';
+    sched.style.flex='0 0 300px';
+    r3.appendChild(sched);
+    var cb=el('input');cb.type='checkbox';cb.id='mg-a-on';cb.style.flex='none';
+    r3.appendChild(cb);
+    r3.appendChild(el('span',null,'启用（自动运行要花你的额度，默认不勾）')).style.cssText='font-size:13px;color:#6b7280';
+    form.appendChild(r3);
+    var r4=el('div','row');
+    var save=el('button','btn go','保存任务');
+    var runnow=el('button','btn','立即运行一次（不保存）');
+    var tip=el('span','','');tip.id='mg-a-tip';tip.style.cssText='font-size:12.5px;color:#9aa1ab';
+    r4.appendChild(save);r4.appendChild(runnow);r4.appendChild(tip);
+    form.appendChild(r4);
+    wrap.appendChild(form);
+
+    var scenes=el('div');
+    scenes.appendChild(el('div',null,'热门场景（点一下填进上面）')).style.cssText='font-size:13.5px;font-weight:600;margin:16px 0 8px';
+    [['每日竞品价格','每天 09:00','在浏览器里查这两个商品的当前价格，和昨天记录对比，涨跌超过 5% 就标出来'],
+     ['批量整理文件','每天 20:00','整理下载目录：按类型分好，重复文件列出来等我确认，不要删'],
+     ['日志巡检','每小时','检查服务日志里的错误，统计出现最多的三类错误并给出可能原因'],
+     ['周报素材收集','每天 18:00','汇总今天这个目录里的文件改动，生成明天写周报要用的素材清单']]
+      .forEach(function(s){
+        var tag=el('span','sc',s[0]);
+        tag.onclick=function(){
+          box.querySelector('#mg-a-name').value=s[0];
+          box.querySelector('#mg-a-prompt').value=s[2];
+          box.querySelector('#mg-a-sched').value=s[1];
+        };
+        scenes.appendChild(tag);
+      });
+    wrap.appendChild(scenes);
+
+    var listTitle=el('div',null,'已建任务');
+    listTitle.style.cssText='font-size:13.5px;font-weight:600;margin:18px 0 10px';
+    wrap.appendChild(listTitle);
+    var list=el('div');list.id='mg-a-list';
+    (d.automations||[]).forEach(function(a){
+      var it=el('div','item');
+      var left=el('div');left.style.cssText='flex:1;min-width:0';
+      left.appendChild(el('div',null,a.name)).style.cssText='font-size:14.5px;font-weight:600';
+      var meta=el('div',null,(a.enabled?'已启用':'已停用')+' · '+(a.schedule||'未设时间')+(a.schedule_ok?'':'（时间写法不认识）')+(a.last_run?(' · 上次运行 '+new Date(a.last_run*1000).toLocaleString('zh-CN')):' · 还没运行过'));
+      meta.style.cssText='font-size:12.5px;color:#9aa1ab;margin-top:4px';
+      left.appendChild(meta);
+      if(a.last_result){var res=el('div',null,a.last_result.slice(0,120));res.style.cssText='font-size:12.5px;color:#6b7280;margin-top:6px';left.appendChild(res);}
+      it.appendChild(left);
+      var b1=el('button','btn','立即运行');
+      b1.onclick=function(){b1.textContent='运行中…';runTask(a.prompt,'/tmp/jancode-auto-'+encodeURIComponent(a.name)+'.md').then(function(out){b1.textContent='立即运行';tip.textContent='已完成，结果记在任务下面';load();});};
+      var b2=el('button','btn',a.enabled?'停用':'启用');
+      b2.onclick=function(){post('/api/automations',{name:a.name,prompt:a.prompt,schedule:a.schedule,enabled:!a.enabled}).then(load);};
+      var b3=el('button','btn','删除');
+      b3.onclick=function(){post('/api/automations',{delete:a.name}).then(load);};
+      it.appendChild(b1);it.appendChild(b2);it.appendChild(b3);
+      list.appendChild(it);
+    });
+    if(!(d.automations||[]).length){
+      var e=el('div',null,'还没有自动化任务。上面填一个，或者点下面的热门场景。');
+      e.style.cssText='font-size:13.5px;color:#6b7280;padding:10px 0 20px';
+      list.appendChild(e);
+    }
+    wrap.appendChild(list);
+    box.appendChild(wrap);
+
+    function runTask(prompt,saveTo){
+      return fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({prompt:prompt+'\n\n（把结果写成文件：'+saveTo+'）',history:[]})})
+        .then(function(r){return r.text();});
+    }
+    save.onclick=function(){
+      var n=box.querySelector('#mg-a-name').value.trim();
+      if(!n){tip.textContent='先给任务起个名字';return;}
+      post('/api/automations',{name:n,prompt:box.querySelector('#mg-a-prompt').value.trim(),
+        schedule:box.querySelector('#mg-a-sched').value.trim(),enabled:box.querySelector('#mg-a-on').checked})
+        .then(function(res){tip.textContent=res.ok?'已保存':'失败：'+(res.error||'');load();});
+    };
+    runnow.onclick=function(){
+      var p=box.querySelector('#mg-a-prompt').value.trim();
+      if(!p){tip.textContent='先写清楚要做什么';return;}
+      tip.textContent='正在运行…（会真的执行，可能要一会儿）';
+      runTask(p,'/tmp/jancode-auto-preview.md').then(function(){tip.textContent='这次执行已完成';});
+    };
+  }
+  function load(){fetch('/api/automations').then(function(r){return r.json();}).then(render).catch(function(){});}
+  setInterval(function(){try{ensureNav();}catch(e){}},1200);
+})();
+</script>
 </body>
 </html>
 
