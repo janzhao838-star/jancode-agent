@@ -2086,6 +2086,76 @@ main,.main,#main{overflow:hidden}
   setInterval(function(){try{inject();}catch(e){}},900);
 })();
 </script>
+
+<style>
+#mg-stop{position:fixed;right:22px;bottom:56px;z-index:9999;height:32px;padding:0 14px;border-radius:9px;
+  border:1px solid #f3d3d3;background:#fff;color:#dc2626;font-size:13px;cursor:pointer;display:none}
+#mg-stop:hover{background:#fff5f5}
+#mg-queue{position:fixed;right:22px;bottom:138px;z-index:9999;background:rgba(91,62,232,.9);color:#fff;
+  font-size:12px;padding:5px 11px;border-radius:8px;display:none}
+</style>
+<script>
+/* 允许「插话」：运行中不再锁输入框，随时可以再发一条。
+   服务端本来就是多线程的，能同时处理；之前卡住的真正原因是界面把输入禁用了。
+   同时给一个「停止」按钮，能把当前这一轮掐掉。 */
+(function(){
+  var active=0, controllers=[];
+  function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
+  var stop=null, badge=null;
+  function ensure(){
+    if(!stop){
+      stop=el('button',null,'停止这一轮');stop.id='mg-stop';
+      stop.onclick=function(){
+        controllers.forEach(function(c){try{c.abort();}catch(e){}});
+        controllers=[];active=0;
+        stop.style.display='none';
+        if(badge)badge.style.display='none';
+      };
+      document.body.appendChild(stop);
+    }
+    if(!badge){badge=el('div',null,'');badge.id='mg-queue';document.body.appendChild(badge);}
+  }
+  // 关键：把「运行中」被禁用的输入框和按钮解禁，用户才能插话
+  setInterval(function(){
+    ensure();
+    document.querySelectorAll('textarea,input[type=text]').forEach(function(e){
+      if(e.disabled||e.readOnly){e.disabled=false;e.readOnly=false;e.removeAttribute('disabled');}
+    });
+    document.querySelectorAll('button').forEach(function(b){
+      if(b.disabled&&b.id!=='mg-stop'){b.disabled=false;b.removeAttribute('disabled');}
+    });
+  },400);
+  var orig=window.fetch;
+  window.fetch=function(url,opts){
+    var isRun=String(url).indexOf('/api/run')>=0;
+    if(isRun){
+      ensure();
+      active+=1;
+      stop.style.display='block';
+      badge.style.display='block';
+      badge.textContent=active>1?('同时进行 '+active+' 轮（插话已生效）'):'进行中，可以继续插话';
+      var ctrl=null;
+      try{
+        if(window.AbortController){
+          ctrl=new AbortController();
+          opts=Object.assign({},opts,{signal:ctrl.signal});
+          controllers.push(ctrl);
+        }
+      }catch(e){}
+      var pr=orig.call(this,url,opts);
+      var done=function(){
+        active=Math.max(0,active-1);
+        if(ctrl)controllers=controllers.filter(function(x){return x!==ctrl;});
+        if(active===0){stop.style.display='none';badge.style.display='none';}
+        else{badge.textContent='同时进行 '+active+' 轮（插话已生效）';}
+      };
+      pr.then(done).catch(done);
+      return pr;
+    }
+    return orig.call(this,url,opts);
+  };
+})();
+</script>
 </body>
 </html>
 
