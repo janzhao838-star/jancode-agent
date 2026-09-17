@@ -208,35 +208,38 @@ class Client:
             return self._parse_responses(data)
         return self._parse_chat(data)
 
-    async def stream_chat(
+    async def stream_reply(
         self,
         messages: list[Message],
         tools: list[dict[str, Any]] | None = None,
     ):
-        """流式取回纯文本回答，逐块 yield 文本增量。
+        """流式取回一次回复，产出事件字典。
 
-        为什么单独开一个方法而不是把 complete() 改成流式：
-        有工具调用的回合必须先拿到完整的 tool_calls 才能决定下一步，
-        边收边用会写出「参数还没收全就去执行」的 bug。所以只让纯文本
-        回答走流式，工具回合照旧一次性拿完。
+        为什么要有这个方法（而不是只用 stream_chat）：
+        流式下 tool_calls 是分片到达的——同一个 index 会被多次 delta 更新，
+        第一次带 id 和函数名，后面只给 arguments 的片段。所以要边收边拼。
+        收完之后才知道这轮到底是「纯文本回答」还是「要调工具」。
 
-        失败时抛 ProviderError，由调用方决定是否退回 complete()。
-        这点很重要：不是所有中转站都真支持 stream，有的会把 stream
-        当摆设、有的直接 400。静默失败会让用户彻底看不到回答，
-        所以宁可抛出来退回一次性请求。
+        产出的事件：
+          {"type": "text",  "text": 增量文本}
+          {"type": "tools", "tool_calls": [{"id","name","arguments"}]}
+        一条都不产出时抛 ProviderError，由上层退回一次性请求。
         """
         if self._http is None:
             self._http = httpx.AsyncClient(timeout=self.provider.timeout)
 
         base = self.provider.base_url.rstrip("/")
         if self.provider.wire_api == "responses":
-            # responses 协议的流式事件结构和 chat 完全不同，暂时不做，
+            # responses 协议的事件结构和 chat 完全不同，暂时不做，
             # 直接抛出去让调用方退回一次性请求，好过吐出解析不了的东西。
             raise ProviderError("responses 协议暂不支持流式输出")
 
         url = f"{base}/chat/completions"
         payload = self._chat_payload(messages, tools)
         payload["stream"] = True
+
+        pending: dict[int, dict[str, str]] = {}
+        produced = False
 
         async with self._http.stream(
             "POST", url, headers=self._headers(), json=payload
@@ -248,7 +251,6 @@ class Client:
                     f"{raw.decode('utf-8', 'replace')[:300]}"
                 )
 
-            got_any = False
             async for line in resp.aiter_lines():
                 line = line.strip()
                 # SSE 里空行是分隔符，冒号开头是注释/心跳，都要跳过
@@ -264,16 +266,54 @@ class Client:
                 except ValueError:
                     # 半行被切断时不该让整轮失败，跳过这条继续读
                     continue
-                for choice in chunk.get("choices") or []:
-                    piece = (choice.get("delta") or {}).get("content") or ""
-                    if piece:
-                        got_any = True
-                        yield piece
 
-            if not got_any:
-                # 接口收下了请求却一个增量都没给：有的网关会无视 stream，
+                for choice in chunk.get("choices") or []:
+                    delta = choice.get("delta") or {}
+                    piece = delta.get("content") or ""
+                    if piece:
+                        produced = True
+                        yield {"type": "text", "text": piece}
+
+                    # tool_calls 分片：按 index 归并，arguments 逐片拼接
+                    for frag in delta.get("tool_calls") or []:
+                        idx = frag.get("index")
+                        if idx is None:
+                            idx = len(pending)
+                        slot = pending.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+                        if frag.get("id"):
+                            slot["id"] = frag["id"]
+                        fn = frag.get("function") or {}
+                        if fn.get("name"):
+                            slot["name"] = fn["name"]
+                        if fn.get("arguments"):
+                            slot["arguments"] += fn["arguments"]
+
+            if pending:
+                produced = True
+                yield {
+                    "type": "tools",
+                    "tool_calls": [
+                        {"id": pending[i]["id"] or f"call_{i}",
+                         "name": pending[i]["name"],
+                         "arguments": pending[i]["arguments"]}
+                        for i in sorted(pending)
+                    ],
+                }
+
+            if not produced:
+                # 接口收下了请求却什么都没给：有的网关会无视 stream，
                 # 也可能直接返回空。抛出去，让调用方退回一次性请求。
-                raise ProviderError("流式响应里没有任何文本增量")
+                raise ProviderError("流式响应里没有任何内容")
+
+    async def stream_chat(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+    ):
+        """只取文本增量的便捷包装（纯文本回答用）。"""
+        async for event in self.stream_reply(messages, tools):
+            if event.get("type") == "text":
+                yield event["text"]
 
     def _chat_payload(self, messages: list[Message], tools: list[dict[str, Any]] | None) -> dict[str, Any]:
         payload: dict[str, Any] = {
