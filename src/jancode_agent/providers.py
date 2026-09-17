@@ -278,10 +278,17 @@ class Client:
         # 上一次「收到内容」的时刻。心跳行会把等待重置，所以不能按
         # 「上次收到任何东西」计时，只能按「上次收到真正内容」计时。
         last_content = 0.0
+        # 累积已产出的文本，用来判断「话是不是已经说完了」
+        buf = ""
 
-        async with self._http.stream(
+        request = self._http.build_request(
             "POST", url, headers=self._headers(), json=payload
-        ) as resp:
+        )
+        resp = await self._http.send(request, stream=True)
+        # 这里刻意不用 async with：退出时会 await resp.aclose()，
+        # 而实测网关会把 SSE 连接多挂好几秒才真正关闭，于是用户在
+        # 文字吐完之后还要盯着转圈。改成自己控制关闭，见下面的 finally。
+        try:
             if resp.status_code >= 400:
                 raw = await resp.aread()
                 raise ProviderError(
@@ -296,11 +303,18 @@ class Client:
                 # 实测网关会把 SSE 连接多挂 20 秒都不关也不发数据，
                 # 傻等它只会让用户看到「字都显示完了还在转圈」。
                 if not produced:
+                    # 还没吐第一个字：推理模型可能要想很久，给足时间
                     idle = 120.0
                 else:
-                    # 距上次内容超过 6 秒就认定说完了。用剩余时间当超时，
-                    # 这样即使网关一直在发心跳，也不会被无限重置。
-                    idle = max(0.2, 6.0 - (time.monotonic() - last_content))
+                    # 已经吐过内容了，判断话是不是说完了：
+                    # 以句末标点/换行收尾的，静默 2.5 秒就认定说完；
+                    # 看不出收尾的给足 15 秒，避免把半句话截断。
+                    # 用「剩余时间」当超时，这样网关一直发心跳也不能无限重置。
+                    looks_done = buf.rstrip().endswith(
+                        ("。", "！", "？", "…", ".", "!", "?", chr(10), chr(34), "”", "`")
+                    )
+                    limit = 2.5 if looks_done else 15.0
+                    idle = max(0.2, limit - (time.monotonic() - last_content))
                 try:
                     line = await asyncio.wait_for(lines.__anext__(), timeout=idle)
                 except StopAsyncIteration:
@@ -331,6 +345,7 @@ class Client:
                     if piece:
                         produced = True
                         last_content = time.monotonic()
+                        buf += piece
                         yield {"type": "text", "text": piece}
 
                     # tool_calls 分片：按 index 归并，arguments 逐片拼接
@@ -384,6 +399,15 @@ class Client:
                         return
                 # 确实什么都没有才抛错，让调用方退回一次性请求。
                 raise ProviderError("流式响应里没有任何内容")
+
+        finally:
+            # 绝不死等连接关闭：实测网关会把连接挂住十几秒。
+            # 给它 1 秒，关不掉就放着——这个客户端用完就关，
+            # 不值得为一次优雅关闭让用户多等。
+            try:
+                await asyncio.wait_for(resp.aclose(), timeout=1.0)
+            except Exception:
+                pass
 
     async def stream_chat(
         self,
