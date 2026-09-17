@@ -24,7 +24,7 @@ from dataclasses import dataclass, field, replace
 from typing import AsyncIterator, Callable
 
 from .config import AgentConfig
-from .providers import Client, Message, ProviderError, ToolCall
+from .providers import Client, Message, ProviderError, ToolCall, Reply
 from .mcp import manager
 from .tools import ToolResult, Toolbox
 
@@ -79,6 +79,9 @@ class Step:
     tool_ok: bool = True
     # 非空表示这一步来自子智能体，值是子智能体的标签（界面据此缩进/标注）。
     subagent: str = ""
+    # True 表示这只是一个文字片段，界面要追加而不是替换。
+    # 流式输出的关键：整段回答会拆成很多个 delta 事件发出去。
+    delta: bool = False
     # 内部使用：工具结果本身。只有「工具执行完」那一步会带上它，
     # 供 run() 把结果回灌进历史。不参与发给界面的序列化。
     result: ToolResult | None = None
@@ -250,16 +253,62 @@ class Agent:
         seen: list[tuple[str, str]] = []  # 重复调用检测
 
         for step_no in range(1, self.config.max_steps + 1):
+            # 先试流式：纯文本回答能边生成边显示，这就是用户要的
+            # 「不要一直等最后答案」。流式里也能收全分片的 tool_calls，
+            # 所以两种回合都走得通；接口不支持流式时会抛 ProviderError，
+            # 退回下面的一次性请求。
+            reply: Reply | None = None
+            streamed = ""
             try:
-                reply = await self._client.complete(self.messages, specs)
-            except ProviderError as exc:
-                yield Step("error", tool_ok=False, text=str(exc))
-                return
+                async for event in self._client.stream_reply(self.messages, specs):
+                    if event.get("type") == "text":
+                        piece = event["text"]
+                        streamed += piece
+                        yield Step("answer", text=piece, delta=True)
+                    elif event.get("type") == "full":
+                        # 网关不认 stream，直接把完整回复给过来了：用它，
+                        # 不再多发一次请求。
+                        reply = event["reply"]
+                    elif event.get("type") == "tools":
+                        calls = []
+                        for item in event.get("tool_calls") or []:
+                            raw = (item.get("arguments") or "").strip() or "{}"
+                            try:
+                                args = json.loads(raw)
+                            except ValueError:
+                                args = {"_raw": raw}
+                            calls.append(ToolCall(
+                                id=item.get("id") or "call",
+                                name=item.get("name") or "",
+                                arguments=args,
+                            ))
+                        reply = Reply(content=streamed, tool_calls=calls)
+            except (ProviderError, AttributeError, NotImplementedError):
+                # 静默退回一次性请求。AttributeError 是为了兼容测试里
+                # 的假客户端和任何只实现了 complete() 的客户端——
+                # 没有流式能力应当退回，而不是让整轮任务崩掉。
+                # 已经吐出去的文字收不回来，
+                # 所以只有在什么都没吐的时候才真的退回；
+                # 否则就以已经收到的为准（否则用户会看到重复内容）。
+                reply = Reply(content=streamed) if streamed else None
+
+            if reply is None:
+                try:
+                    reply = await self._client.complete(self.messages, specs)
+                except ProviderError as exc:
+                    yield Step("error", tool_ok=False, text=str(exc))
+                    return
 
             if not reply.wants_tools:
-                text = reply.content.strip() or "（模型没有返回内容）"
+                text = (reply.content or "").strip() or "（模型没有返回内容）"
                 self.messages.append(Message(role="assistant", content=text))
-                yield Step("answer", text=text)
+                if streamed:
+                    # 内容已经逐块发过了，这里只发一个结束标记，
+                    # 界面据此收掉「正在输入」状态。
+                    yield Step("answer", text="", delta=False)
+                else:
+                    # 退回了一次性请求，这里补发完整回答
+                    yield Step("answer", text=text)
                 return
 
             self.messages.append(Message(

@@ -101,6 +101,38 @@ def _parse_arguments(raw: Any) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def reply_from_payload(data: dict[str, Any]) -> Reply:
+    """把 OpenAI 兼容的响应体解析成 Reply。
+
+    抽出来是为了让「流式退回」和一次性请求走同一套解析逻辑——
+    两处各写一遍迟早会不一致（工具调用参数的解析尤其容易写岔）。
+    """
+    choice = (data.get("choices") or [{}])[0]
+    msg = choice.get("message") or {}
+    calls: list[ToolCall] = []
+    for item in msg.get("tool_calls") or []:
+        fn = item.get("function") or {}
+        raw = fn.get("arguments")
+        if isinstance(raw, str):
+            try:
+                args = json.loads(raw) if raw.strip() else {}
+            except ValueError:
+                args = {"_raw": raw}
+        else:
+            args = raw or {}
+        calls.append(ToolCall(
+            id=item.get("id") or "call",
+            name=fn.get("name") or "",
+            arguments=args,
+        ))
+    return Reply(
+        content=msg.get("content") or "",
+        tool_calls=calls,
+        finish_reason=choice.get("finish_reason") or "",
+        usage=data.get("usage") or {},
+    )
+
+
 class Client:
     """OpenAI 兼容协议的异步客户端。"""
 
@@ -239,6 +271,7 @@ class Client:
         payload["stream"] = True
 
         pending: dict[int, dict[str, str]] = {}
+        raw_lines: list[str] = []
         produced = False
 
         async with self._http.stream(
@@ -257,6 +290,9 @@ class Client:
                 if not line or line.startswith(":"):
                     continue
                 if not line.startswith("data:"):
+                    # 不是 SSE 行，先存着：有的网关会无视 stream=true，
+                    # 直接返回一份完整的 JSON 响应，那种情况可以拿来兜底。
+                    raw_lines.append(line)
                     continue
                 data = line[5:].strip()
                 if data == "[DONE]":
@@ -301,8 +337,19 @@ class Client:
                 }
 
             if not produced:
-                # 接口收下了请求却什么都没给：有的网关会无视 stream，
-                # 也可能直接返回空。抛出去，让调用方退回一次性请求。
+                # 有的网关会无视 stream=true，直接返回一份完整的 JSON。
+                # 这种情况不该白跑一趟再重发一次请求（那会白白多消耗一次
+                # 配额，网关按机器限并发时尤其明显），直接用这份响应。
+                blob = "".join(raw_lines).strip()
+                if blob.startswith("{"):
+                    try:
+                        data = json.loads(blob)
+                    except ValueError:
+                        data = None
+                    if isinstance(data, dict) and data.get("choices"):
+                        yield {"type": "full", "reply": reply_from_payload(data)}
+                        return
+                # 确实什么都没有才抛错，让调用方退回一次性请求。
                 raise ProviderError("流式响应里没有任何内容")
 
     async def stream_chat(
@@ -314,6 +361,12 @@ class Client:
         async for event in self.stream_reply(messages, tools):
             if event.get("type") == "text":
                 yield event["text"]
+            elif event.get("type") == "full":
+                # 网关不认 stream 时会把整段回答一次给过来，照样吐出去，
+                # 这样调用方不用为「支不支持流式」准备两套逻辑。
+                text = event["reply"].content
+                if text:
+                    yield text
 
     def _chat_payload(self, messages: list[Message], tools: list[dict[str, Any]] | None) -> dict[str, Any]:
         payload: dict[str, Any] = {

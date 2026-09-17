@@ -798,10 +798,18 @@ class Handler(BaseHTTPRequestHandler):
 
                 async for step in agent.run(prompt):
                     if step.kind == "answer" and not step.subagent:
-                        last_answer["text"] = step.text
+                        # 流式下回答是分多块来的：增量要累加，
+                        # 非增量的整段回答则直接覆盖。
+                        # 法律声明是靠 last_answer 判断有没有附加过的，
+                        # 拼错这里会导致声明重复或不出现。
+                        if getattr(step, "delta", False):
+                            last_answer["text"] += step.text
+                        elif step.text:
+                            last_answer["text"] = step.text
                     emit({"kind": step.kind, "text": step.text,
                           "tool": step.tool_name, "ok": step.tool_ok,
-                          "subagent": step.subagent})
+                          "subagent": step.subagent,
+                          "delta": getattr(step, "delta", False)})
 
         try:
             asyncio.run(drive())

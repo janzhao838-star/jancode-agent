@@ -81,12 +81,12 @@ data: [DONE]
     assert collect(make_client(sse)) == "ab"
 
 
-def test_接口不支持stream时抛错而不是静默():
-    # 网关无视 stream、返回普通 JSON：一个增量都没有，
-    # 必须抛错让上层退回一次性请求，不能静默返回空串。
+def test_接口不支持stream时用完整响应兜底():
+    # 网关无视 stream、返回普通 JSON 时，不该白跑一趟再重发请求——
+    # 网关按机器限并发时，多打一发会实打实多占一次配额。
+    # 直接把这份完整响应当成回答，行为更正确。
     client = make_client('{"choices":[{"message":{"content":"完整回答"}}]}')
-    with pytest.raises(ProviderError):
-        collect(client)
+    assert collect(client) == "完整回答"
 
 
 def test_错误状态码抛错():
