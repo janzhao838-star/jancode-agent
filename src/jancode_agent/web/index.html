@@ -596,10 +596,7 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
         throw new Error(msg);
       }
       var reader = res.body.getReader(), dec = new TextDecoder(), buf = "";
-      while (true) {
-        var chunk = await reader.read();
-        if (chunk.done) break;
-        buf += dec.decode(chunk.value, { stream: true });
+      var pump = function () {
         var lines = buf.split("\n");
         buf = lines.pop();
         for (var i = 0; i < lines.length; i++) {
@@ -609,6 +606,19 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
           try { ev = JSON.parse(s); } catch (e) { continue; }
           handle(ev, turn);
         }
+      };
+      while (true) {
+        var chunk = await reader.read();
+        if (chunk.done) break;
+        buf += dec.decode(chunk.value, { stream: true });
+        pump();
+      }
+      buf += dec.decode();
+      pump();
+      if (buf.trim()) {
+        // 服务端每行都带换行，这里正常是空；万一最后半行没换行，
+        // 也别把事件吞掉。
+        try { handle(JSON.parse(buf.trim()), turn); } catch (e) {}
       }
       turn.status = turn.error ? "bad" : "ok";
     } catch (e) {
@@ -714,7 +724,15 @@ input:focus,textarea:focus,select:focus{outline:none!important;border-color:var(
       // 连接被中途掐断和正常跑完，在 fetch 这一侧长得一模一样。
       if (!turn.error) turn.status = "ok";
     }
-    if (cur) { renderMain(); }
+    // 流式期间每个 delta 都会走到这里。整页重建不便宜，
+    // 高频重绘长会话会卡：用 rAF 合并到每帧最多一次。
+    if (cur && !renderMain._pending) {
+      renderMain._pending = true;
+      requestAnimationFrame(function () {
+        renderMain._pending = false;
+        renderMain();
+      });
+    }
   }
 
   function notify(turn) {
