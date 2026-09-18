@@ -50,6 +50,43 @@ BUILTIN_PROVIDERS: dict[str, dict[str, str]] = {
         "model": "deepseek-ai/DeepSeek-V3",
         "label": "硅基流动",
     },
+    # 下面五条是从 DeepSeek Harness（本机另一套智能体工具）原样搬来的
+    # 自建接入：同一台 Mac Studio 上跑的开源大模型，OpenAI 兼容协议。
+    # 密钥沿用 Harness 的环境变量名，两边共用同一把，不用配两次。
+    "dgx-glm53": {
+        "base_url": "https://ai.janzhao.cn:9090/deepseek/mac-studio-5/glm53/v1",
+        "model": "glm-5.3-flash",
+        "label": "GLM 5.3 Flash（自建）",
+        "key_env": "DGX_GLM53_KEY",
+        "effort": "high",
+    },
+    "dgx-deepseek-v41": {
+        "base_url": "https://ai.janzhao.cn:9090/deepseek/mac-studio-5/v41/v1",
+        "model": "deepseek-v4.1-flash",
+        "label": "DeepSeek V4.1 Flash（自建）",
+        "key_env": "DGX_DEEPSEEK_V41_KEY",
+        "effort": "high",
+    },
+    "dgx-deepseek-v4": {
+        "base_url": "https://ai.janzhao.cn:9090/deepseek/mac-studio-5/v1",
+        "model": "deepseek-v4-flash-0731",
+        "label": "DeepSeek V4 Flash（自建）",
+        "key_env": "DGX_DEEPSEEK_TP2_KEY",
+        "effort": "low",
+    },
+    "dgx-qwen38": {
+        "base_url": "https://ai.janzhao.cn:9090/v1",
+        "model": "qwen3.8-27b-sglang",
+        "label": "Qwen3.8 27B（自建）",
+        "key_env": "DGX_QWEN_API_KEY",
+    },
+    "dgx-qwen-flash": {
+        "base_url": "https://ai.janzhao.cn:9090/deepseek/mac-studio-5/qwen/v1",
+        "model": "qwen3.8-flash-next",
+        "label": "Qwen3.8 Flash Next（自建）",
+        "key_env": "DGX_QWEN_FLASH_TP2_KEY",
+        "effort": "low",
+    },
 }
 
 
@@ -136,12 +173,17 @@ def _provider_from_name(name: str, api_key: str = "") -> ProviderConfig:
     if spec is None:
         known = "、".join(sorted(BUILTIN_PROVIDERS))
         raise ValueError(f"未知的供应商 {name!r}。可用的有：{known}")
+    # 预设可以声明 key_env：本机多套工具共用同一把密钥时，
+    # 不用在 jancode 配置里再存一份（密钥少一处是一处）。
+    # 显式传入的 api_key（配置文件/界面）优先于环境变量。
+    key = api_key or _env_first(spec["key_env"]) if spec.get("key_env") else api_key
     return ProviderConfig(
         name=name,
         base_url=spec["base_url"],
         model=spec["model"],
         label=spec["label"],
-        api_key=api_key,
+        api_key=key,
+        effort=spec.get("effort", ""),
     )
 
 
