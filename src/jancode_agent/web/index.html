@@ -1846,6 +1846,54 @@ main,.main,#main{overflow:hidden}
   var TILES=['#eef2ff','#e0f2fe','#f0fdf4','#fef3c7','#fce7f3','#f3e8ff'];
   var G=['◆','✦','✧','▣','◈','✳','⚙','✺'];
   function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
+  function renderPresets(box, presets){
+    if(!presets.length)return;
+    var old=document.getElementById('mg-presets');if(old)old.remove();
+    var wrap=el('div');wrap.id='mg-presets';
+    var title=el('div',null,'模式预设');
+    title.style.cssText='font-size:15px;font-weight:650;margin:2px 0 4px';
+    wrap.appendChild(title);
+    var tip=el('div',null,'选一个工作方式，之后的任务都按它来；想改细节就「复制自定义」。');
+    tip.style.cssText='font-size:13px;color:#6b7280;margin:0 0 12px';
+    wrap.appendChild(tip);
+    var grid=el('div');
+    grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-bottom:26px';
+    presets.forEach(function(p, idx){
+      var card=el('div');
+      card.style.cssText='background:#f8f8f9;border-radius:14px;padding:16px;cursor:pointer;border:2px solid transparent;transition:.15s';
+      var head=el('div');head.style.cssText='display:flex;align-items:center;gap:8px';
+      var tile=el('div',null,p.emoji||'◆');
+      tile.style.cssText='width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;background:'+(TILES[idx%TILES.length]);
+      head.appendChild(tile);
+      var nm=el('span',null,p.name);nm.style.cssText='font-weight:600;font-size:14.5px';
+      head.appendChild(nm);
+      card.appendChild(head);
+      var de=el('div',null,p.description||'');
+      de.style.cssText='font-size:12.5px;color:#6b7280;line-height:1.55;margin-top:8px;min-height:38px';
+      card.appendChild(de);
+      var row=el('div');row.style.cssText='display:flex;gap:8px;margin-top:10px';
+      var use=el('button','mg-b','以此为准');use.dataset.preset=p.name;
+      var copy=el('button','mg-b','复制自定义');copy.dataset.copy=p.name;
+      row.appendChild(use);row.appendChild(copy);
+      card.appendChild(row);
+      grid.appendChild(card);
+    });
+    wrap.appendChild(grid);
+    box.insertBefore(wrap, box.firstChild);
+  }
+  function render(d){
+    var view=document.getElementById('view-models');
+    if(!view)return;
+    var box=document.getElementById('mg-prov');
+    if(!box){box=el('div');box.id='mg-prov';view.appendChild(box);}
+    var keep=box.querySelector('#mg-form');
+    box.innerHTML='';
+    var title=el('div','','模型接入');
+    title.style.cssText='font-size:19px;font-weight:650;margin-bottom:4px';
+    box.appendChild(title);
+    var sub=el('div','','填好密钥即可使用。点「添加提供方」从国内厂商和你的 DGX 里选，自动填地址和模型。');
+    sub.style.cssText='font-size:13px;color:#6b7280;margin-bottom:16px';
+    box.appendChild(sub);
   var cat='精选', sig='', items=[];
   function paint(){
     var grid=document.getElementById('mg-grid2');if(!grid)return;
@@ -1872,7 +1920,8 @@ main,.main,#main{overflow:hidden}
     var box=document.getElementById('mg-exp');
     if(!box){box=el('div');box.id='mg-exp';view.appendChild(box);}
     // ── 模式预设：拿到软件第一眼就能选工作方式，不必先建智能体 ──
-    renderPresets(box, d.presets||[]);
+    // renderPresets 本闭包内有定义（见下方），失败不再拖垮整个页面。
+    try{ renderPresets(box, d.presets||[]); }catch(e){ /* 预设画不出来就算了，别挡专家列表 */ }
     items=(d.builtins||[]).slice();
     var names={};items.forEach(function(i){names[i.name]=1;});
     (d.agents||[]).forEach(function(a){if(!names[a.name])items.push({name:a.name,description:'我自己创建的智能体',category:'我的',installed:true});});
@@ -1895,7 +1944,11 @@ main,.main,#main{overflow:hidden}
     box.appendChild(grid);
     paint();
   }
-  function load(){fetch('/api/agents').then(function(r){return r.json();}).then(render).catch(function(){});}
+  function load(){fetch('/api/agents').then(function(r){return r.json();}).then(render).catch(function(){
+    var dead=document.getElementById('mg-exp');
+    // 请求失败也摘掉空壳，轮询下一轮会重新尝试，避免永久白屏。
+    if(dead&&!dead.innerHTML)dead.remove();
+  });}
   document.addEventListener('click',function(e){
     var b=e.target&&e.target.classList&&e.target.classList.contains('mg-b')?e.target:null;
     if(!b||!b.dataset.agent)return;
