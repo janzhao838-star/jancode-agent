@@ -2772,21 +2772,102 @@ main,.main,#main{overflow:hidden}
     document.querySelectorAll(".view").forEach(function(v){v.classList.remove("on");});
     document.querySelectorAll(".nitem").forEach(function(i){i.classList.remove("on");});
     nav.classList.add("on");
-    body.classList.add("on");
+    var outer = document.getElementById("view-presets"); if (outer) outer.classList.add("on");
     if(cache){render();return;}
     fetch("/api/agents").then(function(r){return r.json();}).then(function(d){
       cache={presets:d.presets||[],agents:d.agents||[]};render();
     }).catch(function(){body.innerHTML='<div class="dash-empty">连不上本地服务</div>';});
   }
   document.addEventListener("click",function(e){
-    var t=e.target.closest?e.target.closest("[data-view=\'presets\']"):null;
+    var t=e.target.closest?e.target.closest('[data-view="presets"]'):null;
     if(t){e.preventDefault();e.stopPropagation();open();}
   },true);
+})();
+</script>
+
+<script>
+/* 右侧进度轨：每个任务轮一根小横线，点了就跳过去；运行中右下角报「第 N 轮」。 */
+(function(){
+  var rail=null, badge=null, timer=null, started=0, round=0, deb=null;
+  function make(tag,css){var e=document.createElement(tag);if(css)e.style.cssText=css;return e;}
+  function ensure(){
+    if(!rail){rail=make("div","position:fixed;right:8px;top:76px;bottom:130px;width:16px;z-index:900;display:none");document.body.appendChild(rail);}
+    if(!badge){badge=make("div","position:fixed;right:22px;bottom:142px;z-index:9999;background:rgba(31,35,40,.92);color:#fff;font-size:12.5px;padding:7px 13px;border-radius:9px;pointer-events:none;display:none;font-variant-numeric:tabular-nums");document.body.appendChild(badge);}
+  }
+  function paint(){
+    ensure();
+    var log=document.getElementById("log"), chat=document.getElementById("view-chat");
+    if(!log||!chat||!chat.classList.contains("on")){if(rail)rail.style.display="none";return;}
+    var turns=log.querySelectorAll(".turn");
+    if(turns.length<2){rail.style.display="none";return;}
+    rail.style.display="block";rail.innerHTML="";
+    var sh=Math.max(log.scrollHeight,1);
+    turns.forEach(function(t,i){
+      var pct=Math.min(0.98,Math.max(0.01,(t.offsetTop+12)/sh));
+      var w=make("div","position:absolute;left:0;right:0;height:9px;cursor:pointer;display:flex;align-items:center;justify-content:flex-end");
+      w.style.top=(pct*100)+"%";
+      var d=make("div","width:12px;height:2px;border-radius:2px;background:#c9c9d2;transition:background .12s,height .12s");
+      w.appendChild(d);
+      w.title="第 "+(i+1)+" 轮 · "+(t.querySelector(".turn-head .idx")?t.querySelector(".turn-head .idx").textContent:"");
+      w.onmouseenter=function(){d.style.background="#ff6339";d.style.height="4px";};
+      w.onmouseleave=function(){d.style.background=mark(d)?"#ff6339":"#c9c9d2";d.style.height="2px";};
+      w.onclick=function(){t.scrollIntoView({behavior:"smooth",block:"center"});};
+      rail.appendChild(w);
+    });
+    markCurrent();
+  }
+  function markCurrent(){
+    var log=document.getElementById("log");
+    if(!log||!rail)return;
+    var turns=log.querySelectorAll(".turn");
+    if(turns.length<2)return;
+    var vh=log.clientHeight, pos=log.scrollTop+vh/2, best=0, bd=1e9;
+    turns.forEach(function(t,i){var dd=Math.abs(t.offsetTop-pos);if(dd<bd){bd=dd;best=i;}});
+    rail.querySelectorAll("div>div").forEach(function(d,i){
+      d.style.background=i===best?"#ff6339":"#c9c9d2";
+      d.style.width=i===best?"16px":"12px";
+    });
+  }
+  function mark(d){return d&&d.style.background==="rgb(255, 99, 57)";}
+  function tick(){
+    var s=((Date.now()-started)/1000).toFixed(0);
+    badge.textContent="第 "+round+" 轮 · 执行中 "+s+" 秒";
+    badge.style.display="block";
+  }
+  function stop(){
+    if(timer){clearInterval(timer);timer=null;}
+    var log=document.getElementById("log");
+    var total=log?log.querySelectorAll(".turn").length:round;
+    badge.textContent="第 "+round+" 轮 · 完成（共 "+total+" 轮）";
+    setTimeout(function(){badge.style.display="none";},2600);
+    paint();
+  }
+  var orig=window.fetch;
+  window.fetch=function(url,opts){
+    var isRun=String(url).indexOf("/api/run")>=0;
+    if(isRun&&opts){
+      ensure();
+      var log=document.getElementById("log");
+      round=log?log.querySelectorAll(".turn").length+1:1;
+      started=Date.now();tick();
+      if(timer)clearInterval(timer);
+      timer=setInterval(tick,500);
+    }
+    var pr=orig.call(this,url,opts);
+    if(isRun){pr.then(function(){stop();},function(){stop();});}
+    return pr;
+  };
+  document.addEventListener("click",function(e){
+    var t=e.target.closest?e.target.closest("[data-view]"):null;
+    if(t)setTimeout(paint,350);
+  },true);
   setInterval(function(){try{
-    var v=document.getElementById("view-presets");
-    if(!v)return;
-    var on=document.querySelector(".view.on");
-    if(on&&on!==v)v.classList.remove("on");
-  }catch(e){}},500);
+    var log=document.getElementById("log");
+    if(log)log.onscroll=markCurrent;
+  }catch(e){}},900);
+  if(window.MutationObserver){
+    new MutationObserver(function(){clearTimeout(deb);deb=setTimeout(paint,260);})
+      .observe(document.body,{childList:true,subtree:true});
+  }
 })();
 </script>
