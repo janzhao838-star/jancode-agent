@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -23,6 +24,20 @@ AUTOMATIONS_PATH = LIB_DIR / "automations.json"
 # 技能全文会进系统提示词。不设上限的话，攒到几十条以后每一轮请求都要重新
 # 带上几万字——钱和时间都花在重复读同一堆文本上。
 MAX_SKILL_CHARS = 12_000
+
+# 库文件的读-改-写会从多个线程进来：定时任务线程写运行记录，
+# 界面的 HTTP 线程同时编辑同一条目。没有锁的话两边用同一个
+# 临时文件名互相踩：一方 os.replace 把临时文件改名走了，
+# 另一方对着不存在的文件抛 FileNotFoundError，定时任务线程直接崩。
+# RLock：install_builtin 内部再调 upsert_skill，允许嵌套。
+_LIB_LOCK = threading.RLock()
+
+
+def _locked(fn):
+    def wrapper(*args, **kwargs):
+        with _LIB_LOCK:
+            return fn(*args, **kwargs)
+    return wrapper
 
 
 @dataclass
@@ -83,7 +98,7 @@ def _save(path: Path, items: list[dict]) -> None:
     # JSON，_load 读不出来就返回空列表——用户的技能库会静默清空。
     # 先写同目录临时文件（保证 os.replace 同分区原子改名），再换名顶上。
     text = json.dumps(items, ensure_ascii=False, indent=2)
-    tmp = path.with_name(path.name + ".tmp")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     with open(tmp, "w", encoding="utf-8") as fh:
         fh.write(text)
         fh.flush()
@@ -116,6 +131,7 @@ def find_skill(name: str) -> Skill | None:
     return None
 
 
+@_locked
 def upsert_skill(name: str, description: str = "", content: str = "") -> Skill:
     """新建或覆盖一条技能（按名字）。同名就更新，不另存一份。"""
     items = _load(SKILLS_PATH)
@@ -130,6 +146,7 @@ def upsert_skill(name: str, description: str = "", content: str = "") -> Skill:
     return Skill(name, description, content, now)
 
 
+@_locked
 def delete_skill(name: str) -> bool:
     items = _load(SKILLS_PATH)
     kept = [x for x in items if str(x.get("name") or "").strip() != name]
@@ -193,6 +210,7 @@ def find_agent(name: str) -> Persona | None:
     return None
 
 
+@_locked
 def upsert_agent(name: str, system_prompt: str = "", model: str = "",
                  skills: list[str] | None = None) -> Persona:
     items = _load(AGENTS_PATH)
@@ -210,6 +228,7 @@ def upsert_agent(name: str, system_prompt: str = "", model: str = "",
     return Persona(name, system_prompt, model, picked, now)
 
 
+@_locked
 def delete_agent(name: str) -> bool:
     items = _load(AGENTS_PATH)
     kept = [x for x in items if str(x.get("name") or "").strip() != name]
@@ -254,6 +273,7 @@ def list_automations() -> list[Automation]:
     return out
 
 
+@_locked
 def upsert_automation(name: str, prompt: str = "", schedule: str = "",
                       enabled: bool = False, agent: str = "", model: str = "") -> Automation:
     items = _load(AUTOMATIONS_PATH)
@@ -274,6 +294,7 @@ def upsert_automation(name: str, prompt: str = "", schedule: str = "",
     return Automation(name, prompt, schedule, enabled, agent, model, 0.0, "", now)
 
 
+@_locked
 def record_run(name: str, result: str) -> None:
     """记下这次自动执行的结果，界面上要看得到跑到哪一步了。"""
     items = _load(AUTOMATIONS_PATH)
@@ -285,6 +306,7 @@ def record_run(name: str, result: str) -> None:
             return
 
 
+@_locked
 def delete_automation(name: str) -> bool:
     items = _load(AUTOMATIONS_PATH)
     kept = [x for x in items if str(x.get("name") or "").strip() != name]
@@ -443,6 +465,7 @@ def builtin_skills() -> list[dict]:
     return out
 
 
+@_locked
 def install_builtin(name: str) -> bool:
     """把一条内置技能写进用户的技能库。
 
@@ -995,6 +1018,7 @@ def builtin_agents() -> list[dict]:
     return out
 
 
+@_locked
 def install_builtin_agent(name: str) -> bool:
     for item in BUILTIN_AGENTS:
         if item["name"] == name:
