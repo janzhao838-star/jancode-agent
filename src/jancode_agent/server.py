@@ -624,6 +624,9 @@ class Handler(BaseHTTPRequestHandler):
             "label": p.label or p.name,
             "has_key": bool(p.api_key),
             "key_from_env": bool(os.environ.get("JANCODE_API_KEY")),
+            # 界面的模式控件和预设页要显示当前真实模式，没这个字段它们
+            # 只能各自显示默认值，用户切了预设界面却纹丝不动，像坏了。
+            "active_mode": str(_saved_settings().get("active_mode") or "")[:16],
         })
 
     def _save_settings(self) -> None:

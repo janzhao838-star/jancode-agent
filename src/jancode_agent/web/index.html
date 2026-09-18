@@ -2624,7 +2624,16 @@ main,.main,#main{overflow:hidden}
     }catch(e){}
     return orig.call(this,url,opts);
   };
-  setInterval(function(){try{inject();}catch(e){}},700);
+  function sync(){
+    fetch('/api/settings').then(function(r){return r.json();}).then(function(d){
+      var m=(d&&(d.active_mode||(d.settings&&d.settings.active_mode)))||'';
+      var md=document.getElementById('mg-mode');
+      if(!md)return;
+      for(var i=0;i<md.options.length;i++){if(md.options[i].value===m){md.selectedIndex=i;break;}}
+    }).catch(function(){});
+  }
+  window.syncModeWidget=sync;
+  setInterval(function(){try{inject();sync();}catch(e){}},700);
 })();
 </script>
 
@@ -2748,6 +2757,7 @@ main,.main,#main{overflow:hidden}
         var b1=el("button","mg-btn","使用");
         b1.onclick=function(e){e.stopPropagation();
           post({use_preset:p.name}).then(function(d){
+            if(d&&d.ok!==false&&window.syncModeWidget)window.syncModeWidget();
             alert(d&&d.ok===false?("切换失败："+(d.error||"未知原因")):"已切换到「"+p.name+"」");render();});};
         var b2=el("button","mg-btn","复制为智能体");
         b2.onclick=function(e){e.stopPropagation();
