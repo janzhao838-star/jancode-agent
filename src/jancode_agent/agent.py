@@ -536,4 +536,4 @@ class Agent:
                     name=tc.name,
                 ))
 
-        yield Step("error", tool_ok=False, text=f"已达最大步数 {self.config.max_steps}，任务未完成。可用 --max-steps 放宽上限。")
+        yield Step("error", tool_ok=False, text=f"已达最大步数 {self.config.max_steps} ，任务未完成，在『设置→任务步数上限』里调大后重试，")

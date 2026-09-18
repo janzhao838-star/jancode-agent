@@ -151,6 +151,15 @@ def apply_saved_settings(config: AgentConfig) -> AgentConfig:
     环境变量优先：脚本和 CI 里临时指定接入方式很常见，
     被一个界面存档盖掉会让人完全摸不着头脑。
     """
+    # 步数上限：与接入配置同路，启动与保存都生效。
+    saved_ms = _saved_settings()
+    try:
+        _steps = int(saved_ms.get("max_steps") or 0)
+    except (TypeError, ValueError):
+        _steps = 0
+    if 5 <= _steps <= 500:
+        config = replace(config, max_steps=_steps)
+
     items, active = load_providers()
     row = next((i for i in items if i["name"] == active), None)
     if row is None:
@@ -627,6 +636,7 @@ class Handler(BaseHTTPRequestHandler):
             # 界面的模式控件和预设页要显示当前真实模式，没这个字段它们
             # 只能各自显示默认值，用户切了预设界面却纹丝不动，像坏了。
             "active_mode": str(_saved_settings().get("active_mode") or "")[:16],
+            "max_steps": self.config.max_steps,
         })
 
     def _save_settings(self) -> None:
@@ -645,9 +655,21 @@ class Handler(BaseHTTPRequestHandler):
             value = str(payload.get(key) or "").strip()
             if value:
                 saved[key] = value
+        steps_raw = str(payload.get("max_steps") or "").strip()
+        if steps_raw:
+            try:
+                steps = int(steps_raw)
+            except ValueError:
+                self._json({"ok": False, "error": "步数上限必须是数字"}, 400)
+                return
+            if not 5 <= steps <= 500:
+                self._json({"ok": False, "error": "步数上限要在 5 到 500 之间"}, 400)
+                return
+            saved["max_steps"] = str(steps)
         if not saved:
             self._json({"ok": False, "error": "什么都没填"})
             return
+
 
         try:
             sp = _settings_path()
@@ -665,6 +687,7 @@ class Handler(BaseHTTPRequestHandler):
         self._apply_settings_to_active(saved)
         Handler.config = apply_saved_settings(Handler.config)
         self._json({"ok": True, "has_key": bool(Handler.config.provider.api_key),
+                    "max_steps": Handler.config.max_steps,
                     "model": Handler.config.provider.model,
                     "base_url": Handler.config.provider.base_url})
 

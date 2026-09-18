@@ -344,6 +344,11 @@ button.primary:disabled{opacity:.45;cursor:default}
       <div class="note">也可以在输入框那一行点模型名随时切换，不影响这里。</div>
     </div>
     <div class="field">
+      <label>任务步数上限</label>
+      <input id="setSteps" type="number" min="5" max="500" placeholder="40">
+      <div class="note">智能体一轮任务最多执行的推理步数。总报「已达最大步数」就调大；简单问答调小更省时间。</div>
+    </div>
+    <div class="field">
       <label>微信推送（企业微信群机器人 Webhook）</label>
       <input id="hook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...">
       <div class="note">填上后，每个任务完成时会把结论推到群里。留空即关闭。</div>
@@ -1113,6 +1118,7 @@ button.primary:disabled{opacity:.45;cursor:default}
     fetch("/api/settings").then(function (r) { return r.json(); }).then(function (d) {
       $("setBase").value = d.base_url || "";
       $("setModel").value = d.model || "";
+      $("setSteps").value = d.max_steps || 40;
       $("setInfo").innerHTML = "当前供应商 <b>" + esc(d.label || "-") + "</b>　密钥 <b>" +
         (d.has_key ? (d.key_from_env ? "来自环境变量" : "已配置") : "未配置") + "</b>";
     });
@@ -1122,7 +1128,8 @@ button.primary:disabled{opacity:.45;cursor:default}
   $("setSave").onclick = function () {
     store.hook = $("hook").value.trim(); save(); renderSide();
     postJson("/api/settings", {
-      base_url: $("setBase").value, api_key: $("setKey").value, model: $("setModel").value
+      base_url: $("setBase").value, api_key: $("setKey").value, model: $("setModel").value,
+      max_steps: Number($("setSteps").value) || 40
     }, function () {
       hint.textContent = "设置已保存";
       fetch("/api/models").then(function (r) { return r.json(); }).then(function (d) {
