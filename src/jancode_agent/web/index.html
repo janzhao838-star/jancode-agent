@@ -217,6 +217,29 @@ button.primary:disabled{opacity:.45;cursor:default}
 .pg-search{margin-left:auto;height:40px;width:320px;border:1px solid var(--line);border-radius:12px;
            padding:0 14px;background:#fff;font-size:13.5px;outline:none;transition:.14s}
 .pg-search:focus{border-color:var(--pri);box-shadow:0 0 0 3px rgba(255,99,57,.13)}
+#pgList{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+#pgList .pr-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px;
+           display:flex;gap:12px;align-items:flex-start;cursor:pointer;transition:background .12s}
+#pgList .pr-card:hover{background:#f8f8f9}
+#pgList .pr-card .ic{width:44px;height:44px;border-radius:12px;background:#f4f4f5;display:flex;
+           align-items:center;justify-content:center;font-size:20px;flex:none}
+#pgList .pr-card .tt{font-weight:700;font-size:14.5px;word-break:break-all}
+#pgList .pr-card .dd{color:var(--mut);font-size:12.5px;margin-top:3px}
+.ps-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;margin-top:16px}
+.ps-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;display:flex;
+        flex-direction:column;gap:8px;transition:background .12s;position:relative}
+.ps-card:hover{background:#f8f8f9}
+.ps-card .ps-head{display:flex;align-items:center;gap:9px}
+.ps-card .ps-name{font-size:16px;font-weight:700}
+.ps-card .ps-in{font-size:11px;color:var(--mut2);border:1px solid var(--line);border-radius:999px;padding:1px 8px}
+.ps-card .ps-cur{position:absolute;right:14px;top:14px;font-size:11px;color:#fff;background:var(--ink);
+        border-radius:999px;padding:3px 10px;font-weight:600}
+.ps-card .ps-desc{color:var(--mut);font-size:13px;line-height:1.6}
+.ps-card .ps-key{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--mut2);margin-top:auto}
+.ps-card .ps-row{display:flex;gap:8px;justify-content:flex-end;padding-top:8px}
+.ps-empty{border:1.5px dashed var(--line2);border-radius:16px;padding:26px 0;text-align:center;
+          color:var(--mut);font-size:14px;cursor:pointer;margin-top:16px}
+.ps-empty:hover{color:var(--pri-deep);border-color:var(--pri)}
 .dash-empty{border:1.5px dashed var(--line2);border-radius:16px;padding:56px 0;text-align:center;
              color:var(--mut);font-size:15px}
 .tpl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-top:14px}
@@ -247,6 +270,7 @@ button.primary:disabled{opacity:.45;cursor:default}
       <div class="nitem" data-view="skills"><span class="ni">✦</span>插件&技能</div>
       <div class="nitem" data-view="agents"><span class="ni">☰</span>数字专家</div>
       <div class="nitem" data-view="models"><span class="ni">◆</span>模型接入</div>
+      <div class="nitem" id="nav-presets" data-view="presets"><span class="ni">▣</span>Agent 预设</div>
     </div>
     <div class="side-title">任务 <span style="float:right;font-size:14px">+</span></div>
     <div class="ws-card"><span class="av">🤖</span><span class="nm">JanCode</span><span class="dg">默认</span></div>
@@ -299,6 +323,7 @@ button.primary:disabled{opacity:.45;cursor:default}
   <div class="view" id="view-skills"><div class="pane" id="skillsBody"></div></div>
   <div class="view" id="view-agents"><div class="pane" id="agentsBody"></div></div>
   <div class="view" id="view-models"><div class="pane" id="modelsBody"></div></div>
+  <div class="view" id="view-presets"><div class="pane" id="presetsBody"></div></div>
 </main>
 <div class="mask" id="mask">
   <div class="dlg">
@@ -857,16 +882,24 @@ button.primary:disabled{opacity:.45;cursor:default}
         crumb += ' / <b data-p="' + esc(acc) + '">' + esc(parts[i]) + '</b>';
       }
       var rows = "";
+      var top = curPath === ".";
       for (var j = 0; j < d.entries.length; j++) {
         var e = d.entries[j];
-        rows += '<div class="frow' + (e.dir ? " dir" : "") + '" data-n="' + esc(e.name) + '" data-d="' + (e.dir ? 1 : 0) + '">' +
-                '<span class="nm">' + esc(e.name) + (e.dir ? "/" : "") + '</span>' +
-                '<span class="sz">' + (e.dir ? "" : fmtSize(e.size)) + '</span></div>';
+        if (top && e.name.charAt(0) === ".") continue;
+        if (top) {
+          rows += '<div class="pr-card" data-n="' + esc(e.name) + '" data-d="' + (e.dir ? 1 : 0) + '"><div class="ic">' + (e.dir ? "📁" : "📄") + '</div>' +
+                  '<div><div class="tt">' + esc(e.name) + '</div><div class="dd">' + (e.dir ? "项目目录" : fmtSize(e.size)) + '</div></div></div>';
+        } else {
+          rows += '<div class="frow' + (e.dir ? " dir" : "") + '" data-n="' + esc(e.name) + '" data-d="' + (e.dir ? 1 : 0) + '">' +
+                  '<span class="nm">' + esc(e.name) + (e.dir ? "/" : "") + '</span>' +
+                  '<span class="sz">' + (e.dir ? "" : fmtSize(e.size)) + '</span></div>';
+        }
       }
       var tpl = '<div class="pg-sec"><div class="t">从模板创建</div></div><div class="tpl-grid">' +
           TPLS.map(function(t){return '<div class="tpl-card" data-tpl="' + esc(t.p) + '" title="' + esc(t.p) + '\">' +
             '<div class="ic">' + t.i + '</div><div><div class="tt">' + t.n + '</div><div class="dd">' + t.d + '</div></div></div>';}).join('') + '</div>';
       $("filesBody").innerHTML = '<div class="pg-bar"><div class="pg-h1">项目</div>' +
+        '<button class="pg-new" id="pgNew">＋ 新建项目</button>' +
         '<button class="pg-new" id="pgReload">⟳ 刷新</button></div>' +
         '<div class="pg-sec"><div class="t">我的项目</div>' +
         '<input class="pg-search" id="pgQ" placeholder="搜索项目"></div>' +
@@ -886,6 +919,14 @@ button.primary:disabled{opacity:.45;cursor:default}
       };
       var rl = $("pgReload");
       if (rl) rl.onclick = function () { loadFiles(curPath); };
+      var nb = $("pgNew");
+      if (nb) nb.onclick = function () {
+        var nm = prompt("项目名字：", "");
+        if (!nm) return;
+        var inp = $("input");
+        inp.value = "创建项目「" + nm + "」：在工作区建好目录、写一份 README 说明定位，然后给我下一步建议。";
+        showView("chat"); inp.focus();
+      };
       var tc = $("filesBody").querySelectorAll(".tpl-card");
       for (var t2 = 0; t2 < tc.length; t2++) {
         tc[t2].onclick = function () {
@@ -897,6 +938,13 @@ button.primary:disabled{opacity:.45;cursor:default}
       for (var k = 0; k < marks.length; k++) marks[k].onclick = function () { loadFiles(this.getAttribute("data-p")); };
       var fr = $("filesBody").querySelectorAll(".frow");
       for (var m = 0; m < fr.length; m++) fr[m].onclick = function () { openEntry(this); };
+      var pc = $("filesBody").querySelectorAll(".pr-card");
+      for (var p2 = 0; p2 < pc.length; p2++) (function (card) {
+        card.onclick = function () {
+          if (card.getAttribute("data-d") === "1") loadFiles(card.getAttribute("data-n"));
+          else openEntry(card);
+        };
+      })(pc[p2]);
     }).catch(function () { $("filesBody").innerHTML = '<h2>文件</h2><div class="sub">连不上本地服务</div>'; });
   }
 
@@ -2662,3 +2710,83 @@ main,.main,#main{overflow:hidden}
 </body>
 </html>
 
+<script>
+/* Agent 预设页：内置四预设 + 使用/复制，接 /api/agents 真后端。 */
+(function(){
+  var body=null, nav=null, cache=null;
+  function el(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}
+  function post(d){return fetch("/api/agents",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){return r.json();});}
+  function curMode(){
+    return fetch("/api/settings").then(function(r){return r.json();}).then(function(d){
+      return (d&&d.settings&&d.settings.active_mode)||"auto";});
+  }
+  function render(){
+    body.innerHTML="";
+    var bar=el("div","pg-bar");
+    bar.appendChild(el("div","pg-h1","Agent 预设"));
+    body.appendChild(bar);
+    var tip=el("div",null,"预设就是一个会话里智能体的运行方式——它的工具、提示词与权限。点「使用」立即切换，点「复制」生成同名智能体再自己改。");
+    tip.style.cssText="color:var(--mut);font-size:12.5px;margin:-8px 0 4px";
+    body.appendChild(tip);
+    var sec=el("div","pg-sec");sec.appendChild(el("div","t","内置"));body.appendChild(sec);
+    var grid=el("div","ps-grid");body.appendChild(grid);
+    var ps=cache.presets||[];
+    var agents=(cache.agents||[]).map(function(a){return a.name;});
+    curMode().then(function(mode){
+      ps.forEach(function(p){
+        var c=el("div","ps-card");
+        var head=el("div","ps-head");
+        head.appendChild(el("span","mg-tile",p.emoji||"◆"));
+        head.appendChild(el("span","ps-name",p.name));
+        head.appendChild(el("span","ps-in","内置"));
+        if((p.mode||"auto")===mode)c.appendChild(el("span","ps-cur","当前使用"));
+        c.appendChild(head);
+        c.appendChild(el("div","ps-desc",p.description||""));
+        c.appendChild(el("div","ps-key",(p.mode||"auto")+(p.system_prompt?" · 自定义提示词":"")));
+        var row=el("div","ps-row");
+        var b1=el("button","mg-btn","使用");
+        b1.onclick=function(e){e.stopPropagation();
+          post({use_preset:p.name}).then(function(d){
+            alert(d&&d.ok===false?("切换失败："+(d.error||"未知原因")):"已切换到「"+p.name+"」");render();});};
+        var b2=el("button","mg-btn","复制为智能体");
+        b2.onclick=function(e){e.stopPropagation();
+          if(agents.indexOf(p.name)>=0){alert("已经有同名智能体，去「数字专家」页改它就行。");return;}
+          post({install_preset:p.name}).then(function(d){
+            alert(d&&d.ok===false?("复制失败："+(d.error||"未知原因")):"已复制为智能体，去「数字专家」页可改提示词");});};
+        row.appendChild(b2);row.appendChild(b1);
+        c.appendChild(row);
+        grid.appendChild(c);
+      });
+    });
+    var sec2=el("div","pg-sec");sec2.appendChild(el("div","t","自定义"));body.appendChild(sec2);
+    var empty=el("div","ps-empty","＋ 用「创造模式」创作自定义预设");
+    empty.onclick=function(){var i=document.getElementById("input");
+      i.value="用创造模式帮我设计一个自定义 Agent 预设：先问我用途，再给我提示词和工具建议。";
+      var t=document.querySelector('.nitem[data-view="chat"]');if(t)t.click();i.focus();};
+    body.appendChild(empty);
+  }
+  function open(){
+    if(!body)body=document.getElementById("presetsBody");
+    if(!nav)nav=document.getElementById("nav-presets");
+    if(!body||!nav)return;
+    document.querySelectorAll(".view").forEach(function(v){v.classList.remove("on");});
+    document.querySelectorAll(".nitem").forEach(function(i){i.classList.remove("on");});
+    nav.classList.add("on");
+    body.classList.add("on");
+    if(cache){render();return;}
+    fetch("/api/agents").then(function(r){return r.json();}).then(function(d){
+      cache={presets:d.presets||[],agents:d.agents||[]};render();
+    }).catch(function(){body.innerHTML='<div class="dash-empty">连不上本地服务</div>';});
+  }
+  document.addEventListener("click",function(e){
+    var t=e.target.closest?e.target.closest("[data-view=\'presets\']"):null;
+    if(t){e.preventDefault();e.stopPropagation();open();}
+  },true);
+  setInterval(function(){try{
+    var v=document.getElementById("view-presets");
+    if(!v)return;
+    var on=document.querySelector(".view.on");
+    if(on&&on!==v)v.classList.remove("on");
+  }catch(e){}},500);
+})();
+</script>
