@@ -839,7 +839,7 @@ button.primary:disabled{opacity:.45;cursor:default}
     for (var i = 0; i < items.length; i++) {
       items[i].classList.toggle("on", items[i].getAttribute("data-view") === name);
     }
-    var names = ["chat", "files", "skills", "agents", "models", "tools"];
+    var names = ["chat", "files", "skills", "agents", "models", "tools", "presets"];
     for (var j = 0; j < names.length; j++) {
       var box = $("view-" + names[j]);
       if (box) box.classList.toggle("on", names[j] === name);
@@ -850,6 +850,7 @@ button.primary:disabled{opacity:.45;cursor:default}
     if (name === "agents") loadAgents();
     if (name === "models") renderModelsPage();
     if (name === "tools") loadTools();
+    if (name === "presets" && window.renderPresets) window.renderPresets();
   }
   var navItems = document.querySelectorAll(".nitem");
   for (var ni = 0; ni < navItems.length; ni++) {
@@ -2765,23 +2766,15 @@ main,.main,#main{overflow:hidden}
       var t=document.querySelector('.nitem[data-view="chat"]');if(t)t.click();i.focus();};
     body.appendChild(empty);
   }
-  function open(){
+  window.renderPresets = function(){
     if(!body)body=document.getElementById("presetsBody");
-    if(!nav)nav=document.getElementById("nav-presets");
-    if(!body||!nav)return;
-    document.querySelectorAll(".view").forEach(function(v){v.classList.remove("on");});
-    document.querySelectorAll(".nitem").forEach(function(i){i.classList.remove("on");});
-    nav.classList.add("on");
-    var outer = document.getElementById("view-presets"); if (outer) outer.classList.add("on");
+    if(!body)return;
     if(cache){render();return;}
     fetch("/api/agents").then(function(r){return r.json();}).then(function(d){
       cache={presets:d.presets||[],agents:d.agents||[]};render();
     }).catch(function(){body.innerHTML='<div class="dash-empty">连不上本地服务</div>';});
   }
-  document.addEventListener("click",function(e){
-    var t=e.target.closest?e.target.closest('[data-view="presets"]'):null;
-    if(t){e.preventDefault();e.stopPropagation();open();}
-  },true);
+
 })();
 </script>
 

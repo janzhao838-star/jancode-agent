@@ -22,6 +22,14 @@ from jancode_agent.server import WEB_DIR, Handler, _index_html
 INDEX = (WEB_DIR / "index.html").read_text(encoding="utf-8")
 
 
+@pytest.fixture(autouse=True)
+def _隔离真实设置(tmp_path, monkeypatch):
+    """本文件的测试会真起服务，/api/run 每次都读 desktop-settings.json 作模式兜底。
+    要是直接读用户真实配置，用户在界面上切到「计划模式」就会让子智能体测试误报
+    （task 被计划模式硬拦截）——配置是用户的，不是测试的，一律指向临时文件。"""
+    monkeypatch.setattr(Handler, "settings_path", tmp_path / "desktop-settings.json", raising=False)
+
+
 def test_前端读的事件字段服务端都发了():
     """从 JS 里抠出 ev.xxx 的取值，和服务端实际发出的字段比对。"""
     # JS 里所有 ev.<字段>
