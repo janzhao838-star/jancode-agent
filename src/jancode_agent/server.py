@@ -39,9 +39,13 @@ WEB_DIR = Path(__file__).parent / "web"
 SETTINGS_PATH = Path.home() / ".jancode-agent" / "desktop-settings.json"
 
 
+def _settings_path() -> Path:
+    return getattr(Handler, "settings_path", None) or SETTINGS_PATH
+
+
 def _saved_settings() -> dict:
     try:
-        data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+        data = json.loads(_settings_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
@@ -97,11 +101,12 @@ def save_providers(items: list[dict], active: str) -> None:
             payload["api_key"] = row["api_key"]
             payload["model"] = row["model"]
             payload["wire_api"] = row.get("wire_api", "chat")
-    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=1),
+    sp = _settings_path()
+    sp.parent.mkdir(parents=True, exist_ok=True)
+    sp.write_text(json.dumps(payload, ensure_ascii=False, indent=1),
                              encoding="utf-8")
     try:
-        os.chmod(SETTINGS_PATH, 0o600)
+        os.chmod(sp, 0o600)
     except OSError:
         pass
 
@@ -374,9 +379,10 @@ class Handler(BaseHTTPRequestHandler):
         else:
             saved.pop("preset_prompt", None)
         try:
-            SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-            SETTINGS_PATH.write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
-            os.chmod(SETTINGS_PATH, 0o600)
+            sp = _settings_path()
+            sp.parent.mkdir(parents=True, exist_ok=True)
+            sp.write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
+            os.chmod(sp, 0o600)
         except OSError as exc:
             self._json({"ok": False, "error": f"保存失败：{exc}"})
             return
@@ -641,9 +647,10 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         try:
-            SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-            SETTINGS_PATH.write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
-            os.chmod(SETTINGS_PATH, 0o600)  # 里面有密钥
+            sp = _settings_path()
+            sp.parent.mkdir(parents=True, exist_ok=True)
+            sp.write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
+            os.chmod(sp, 0o600)  # 里面有密钥
         except OSError as exc:
             self._json({"ok": False, "error": f"保存失败：{exc}"})
             return
@@ -995,7 +1002,8 @@ class MissingApiKey(RuntimeError):
 def build_server(host: str = "127.0.0.1", port: int = 8765, workspace: Path | None = None,
                  provider: str | None = None,
                  config: AgentConfig | None = None,
-                 require_key: bool = True) -> ThreadingHTTPServer:
+                 require_key: bool = True,
+                 settings_path: Path | None = None) -> ThreadingHTTPServer:
     """装配好配置、建好服务，但**不启动**。
 
     把「建」和「跑」分开是为了桌面版：它要在后台线程里跑 serve_forever，
@@ -1005,6 +1013,9 @@ def build_server(host: str = "127.0.0.1", port: int = 8765, workspace: Path | No
     # 刻意不在这里合并界面保存的设置：build_server 也会被命令行和网页版用到，
     # 那边用户可能是用 --api-key/--base-url 明确指定的，被文件里的旧值盖掉
     # 就是「我传了参数却不生效」。合并只发生在桌面版的入口（desktop.main）。
+    # 测试/冒烟把设置文件指到临时目录，POST /api/settings 才不会把假配置
+    # 写进用户真实的 desktop-settings.json。
+    Handler.settings_path = settings_path
     Handler.config = config or load_config(
         provider_name=provider, workspace=workspace or Path.cwd())
     if require_key and not Handler.config.provider.api_key:

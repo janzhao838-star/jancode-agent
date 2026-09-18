@@ -34,7 +34,11 @@ def main() -> int:
         provider=ProviderConfig(name="t", base_url="http://x:1/v1", model="m", api_key="k"),
         workspace=tmp,
     )
-    httpd = build_server(port=0, config=cfg, require_key=False)
+    # 设置文件必须隔离：POST /api/settings 这一步以前会把假配置
+    # (y:2/mm) 直接写进用户真实的 desktop-settings.json，还把选中
+    # 的接入方式切走，跑完冒烟界面上的模型就变成了 mm。
+    httpd = build_server(port=0, config=cfg, require_key=False,
+                         settings_path=tmp / "desktop-settings.json")
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     base = "http://127.0.0.1:%d" % httpd.server_address[1]
 
