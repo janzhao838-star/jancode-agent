@@ -120,7 +120,7 @@ button.primary{background:var(--pri);color:#fff;border:0;border-radius:10px;padd
                font-weight:600;cursor:pointer;font-size:13px;transition:.14s}
 button.primary:hover{background:var(--pri-h)}
 button.primary:disabled{opacity:.45;cursor:default}
-#send{width:36px;height:36px;padding:0;border-radius:999px;font-size:15px;flex:none}
+#send{min-width:64px;max-width:140px;height:36px;padding:0 16px;border-radius:999px;font-size:13px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chipbtn{display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;
          background:#f7f7f8;border:1px solid var(--line);border-radius:9px;
          padding:6px 11px;color:var(--ink);max-width:320px;transition:.13s}
@@ -2264,7 +2264,7 @@ main,.main,#main{overflow:hidden}
     if(!btn||document.getElementById('mg-effort'))return;
     var sel=document.createElement('select');
     sel.id='mg-effort';sel.title='推理速度：越深越慢但更准';
-    sel.style.cssText='height:32px;border:1px solid #ececf1;border-radius:8px;padding:0 8px;font-size:12.5px;background:#fff;color:#4b5563;margin-left:8px;cursor:pointer';
+    sel.style.cssText='height:32px;border:1px solid #e8e8eb;border-radius:9px;padding:0 8px;font-size:12.5px;background:#fff;color:#4b5563;margin-left:8px;cursor:pointer;max-width:110px';
     ['default','low','high','max'].forEach(function(l){
       var x=document.createElement('option');x.value=l==='default'?'':l;x.textContent=LABEL[l]||l;sel.appendChild(x);
     });
@@ -2558,7 +2558,7 @@ main,.main,#main{overflow:hidden}
     if(!eff||document.getElementById('mg-mode'))return;
     var md=document.createElement('select');
     md.id='mg-mode';md.title='工作模式：计划模式下先出方案，只读模式下不许改文件';
-    md.style.cssText='height:32px;border:1px solid #ececf1;border-radius:8px;padding:0 8px;font-size:12.5px;background:#fff;color:#4b5563;margin-left:8px;cursor:pointer';
+    md.style.cssText='height:32px;border:1px solid #e8e8eb;border-radius:9px;padding:0 8px;font-size:12.5px;background:#fff;color:#4b5563;margin-left:8px;cursor:pointer;max-width:110px';
     MODES.forEach(function(x){var o=document.createElement('option');o.value=x[0];o.textContent=x[1];md.appendChild(o);});
     eff.parentNode.insertBefore(md,eff.nextSibling);
   }
