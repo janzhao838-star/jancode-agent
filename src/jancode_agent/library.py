@@ -85,9 +85,25 @@ class Automation:
 
 
 def _load(path: Path) -> list[dict]:
+    # Windows 上 os.replace 换名瞬间，别的线程正打开着旧文件会让
+    # read_text 撞上瞬态 PermissionError。直接吞掉返回空列表的话，
+    # upsert 会拿空库存盘——用户数据静默清空。先短暂重试。
+    raw = None
+    for attempt in range(20):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            break
+        except PermissionError:
+            if os.name != "nt":
+                return []
+            time.sleep(0.02)
+        except OSError:
+            return []
+    if raw is None:
+        return []
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        data = json.loads(raw)
+    except ValueError:
         return []
     return [x for x in data if isinstance(x, dict)] if isinstance(data, list) else []
 

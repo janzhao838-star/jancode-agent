@@ -33,6 +33,10 @@ def test_写入后任何时刻文件都是完整JSON(tmp_path, monkeypatch):
         while not stop.is_set():
             try:
                 json.loads(path.read_text(encoding="utf-8"))
+            except PermissionError:
+                # Windows 上 replace 换名瞬间读者会撞上瞬态拒绝访问，
+                # 重试即可——这不是「读到坏文件」。应用层 _load 同样处理。
+                time.sleep(0.02)
             except (OSError, ValueError) as exc:
                 bad.append(exc)
 
