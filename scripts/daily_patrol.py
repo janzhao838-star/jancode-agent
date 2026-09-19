@@ -45,7 +45,8 @@ def main():
     all_ok &= check("pytest", r.returncode == 0, tail[0])
 
     r = run("python3 scripts/crosscheck.py")
-    all_ok &= check("crosscheck", r.returncode == 0, r.stdout.strip().splitlines()[-1:][0] if r.stdout else "")
+    out = (r.stdout or r.stderr).strip().splitlines()
+    all_ok &= check("crosscheck", r.returncode == 0, out[-1] if out else "无输出")
 
     r = run(".venv/bin/python scripts/smoke.py", timeout=300)
     ok = "ALL OK" in (r.stdout or "")

@@ -85,8 +85,6 @@ class Toolbox:
         self.allow_subagents = allow_subagents
         self.spawn_subagent = spawn_subagent
         self.mode = (mode or "auto").strip().lower()
-        # 浏览器后台标签页登记：本智能体开的标签自己记着、自己收尾。
-        self._browser_tabs: list[int] = []
 
     # ---------- 工作模式（代码级拦截） ----------
 
