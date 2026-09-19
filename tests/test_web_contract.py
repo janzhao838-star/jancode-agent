@@ -70,7 +70,11 @@ def test_前端认识的_kind_服务端都会发():
     # 扫整个 agent 模块而不是只看 Agent.run：步骤是在哪一层产出的属于实现细节，
     # 契约只关心「这个模块会不会发出界面不认识的 kind」。
     emitted = set(re.findall(r'Step\("([a-z]+)"', inspect.getsource(agent_module)))
-    emitted |= {"done"}   # server.py 结束时会补一个 done
+    import jancode_agent.server as server_module
+    # server.py 的 emit 同样是契约的一半：status（连接提示）从这里发出
+    emitted |= set(re.findall(r'emit\({"kind": "([a-z]+)"',
+                               inspect.getsource(server_module)))
+    emitted |= {"done"}
 
     unhandled = emitted - handled
     assert not unhandled, (

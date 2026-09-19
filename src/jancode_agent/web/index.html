@@ -550,6 +550,11 @@ button.primary:disabled{opacity:.45;cursor:default}
       el.appendChild(ans);
     }
     if (t.tools && t.tools.length) el.appendChild(chipsEl(t.tools));
+    if (t.note && !t.answer && !(t.tools && t.tools.length) && !t.error) {
+      var nt = document.createElement("div");
+      nt.className = "err"; nt.textContent = "… " + t.note;
+      el.appendChild(nt);
+    }
     if (t.error) {
       var er = document.createElement("div");
       er.className = "err"; er.textContent = "✗ " + t.error;
@@ -797,6 +802,9 @@ button.primary:disabled{opacity:.45;cursor:default}
     } else if (ev.kind === "usage") {
       // 网关报的 token 用量：累计到会话级，输入框下方的统计行就吃它。
       if (ev.usage) updateUsageBar(ev.usage);
+    } else if (ev.kind === "status") {
+      // 网关挂死时以前一行字都没有，用户以为点没反应；这条让界面立刻有反馈
+      turn.note = ev.text;
     } else if (ev.kind === "error") {
       turn.error = (ev.subagent ? "[" + ev.subagent + "] " : "") + ev.text;
     } else if (ev.kind === "done") {

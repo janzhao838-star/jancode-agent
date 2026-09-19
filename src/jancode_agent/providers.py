@@ -147,7 +147,10 @@ class Client:
 
     async def __aenter__(self) -> "Client":
         if self._http is None:
-            self._http = httpx.AsyncClient(timeout=self.provider.timeout)
+            # read 超时兜住「网关收了请求却不回」的挂死：/models 秒回但 chat
+            # 端点 0 字节挂着的中转站，以前要静默等满 300 秒，用户以为死机。
+            self._http = httpx.AsyncClient(timeout=httpx.Timeout(
+                self.provider.timeout, connect=15.0, read=90.0))
         return self
 
     async def __aexit__(self, *exc: object) -> None:
@@ -180,7 +183,10 @@ class Client:
     ) -> Reply:
         """发起一次对话补全。按 provider.wire_api 选择协议。"""
         if self._http is None:
-            self._http = httpx.AsyncClient(timeout=self.provider.timeout)
+            # read 超时兜住「网关收了请求却不回」的挂死：/models 秒回但 chat
+            # 端点 0 字节挂着的中转站，以前要静默等满 300 秒，用户以为死机。
+            self._http = httpx.AsyncClient(timeout=httpx.Timeout(
+                self.provider.timeout, connect=15.0, read=90.0))
 
         base = self.provider.base_url.rstrip("/")
         if self.provider.wire_api == "responses":
@@ -273,7 +279,10 @@ class Client:
         一条都不产出时抛 ProviderError，由上层退回一次性请求。
         """
         if self._http is None:
-            self._http = httpx.AsyncClient(timeout=self.provider.timeout)
+            # read 超时兜住「网关收了请求却不回」的挂死：/models 秒回但 chat
+            # 端点 0 字节挂着的中转站，以前要静默等满 300 秒，用户以为死机。
+            self._http = httpx.AsyncClient(timeout=httpx.Timeout(
+                self.provider.timeout, connect=15.0, read=90.0))
 
         base = self.provider.base_url.rstrip("/")
         if self.provider.wire_api == "responses":

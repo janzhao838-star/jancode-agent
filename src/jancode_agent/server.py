@@ -1006,6 +1006,7 @@ class Handler(BaseHTTPRequestHandler):
                           "delta": getattr(step, "delta", False),
                           "usage": getattr(step, "usage", None) or None})
 
+        emit({"kind": "status", "text": "正在连接 " + config.provider.model + " @ " + config.provider.base_url})
         try:
             asyncio.run(drive())
             # 法律声明由这里强制附加：模型忘了、改写了、或者被后续指令盖掉了，
@@ -1016,7 +1017,7 @@ class Handler(BaseHTTPRequestHandler):
         except ProviderError as exc:
             emit({"kind": "error", "text": str(exc)})
         except Exception as exc:  # 兜底：任何异常都要让界面看到，而不是静默断流
-            emit({"kind": "error", "text": f"内部错误：{exc}"})
+            emit({"kind": "error", "text": "内部错误：" + (str(exc) or type(exc).__name__)})
         finally:
             # 客户端中途断连时 emit 会抛 BrokenPipeError，不进 finally 的清理
             # 会把 run_id 留在 LIVE 里——越积越多，还让 stop 误以为还活着。
