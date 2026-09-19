@@ -70,7 +70,7 @@ def sandbox(tmp_path, monkeypatch):
     stub = bin_dir / "jancode-agent"
     stub.write_text("#!/bin/sh\necho \"jancode-agent 0.1.0 (stub)\"\n")
     stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
-    env = dict(os.environ, HOME=str(home), PATH=f"{bin_dir}:{os.environ["PATH"]}")
+    env = dict(os.environ, HOME=str(home), PATH=f'{bin_dir}:{os.environ["PATH"]}')
     # 开发机上常驻 OPENAI_*/JANCODE_* 变量（接别的客户端用的）。
     # load_config 的环境覆盖会把它们抬到配置文件之上，测试必须隔离，
     # 否则脚本明明写对了也会被读成别的站。

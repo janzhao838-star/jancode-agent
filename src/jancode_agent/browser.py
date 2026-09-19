@@ -149,6 +149,8 @@ def _find_chrome() -> str | None:
     """找到可用的 Chrome。找不到就明说，别报一个莫名其妙的 FileNotFoundError。"""
     for cand in (
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        shutil.which("google-chrome") or "",
+        shutil.which("google-chrome-stable") or "",
         shutil.which("chrome") or "",
         shutil.which("chromium") or "",
     ):

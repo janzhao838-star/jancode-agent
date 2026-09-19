@@ -15,6 +15,9 @@
 
 用法：python scripts/crosscheck.py   （退出码非 0 表示发现真问题）
 """
+import sys
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # Windows 默认 cp1252，中文必炸
 import pathlib
 import re
 import subprocess
