@@ -433,7 +433,18 @@ class Agent:
                                 arguments=args,
                             ))
                         reply = Reply(content=streamed, tool_calls=calls)
-            except (ProviderError, AttributeError, NotImplementedError):
+            except AttributeError as exc:
+                # 客户端真没有流式能力：退回一次性请求。
+                reply = Reply(content=streamed) if streamed else None
+            except NotImplementedError as exc:
+                reply = Reply(content=streamed) if streamed else None
+            except ProviderError as exc:
+                # 连接类失败（超时/挂死/断流）退回只会再挂一遍：网关已经
+                # 证明不响应，再发一次完整请求还是同样的下场，用户要多等
+                # 一个 90 秒。直接把错误给出去，界面立刻可见。
+                if any(w in str(exc).lower() for w in ("timeout", "timed out", "超时", "没有任何内容")):
+                    raise
+                reply = Reply(content=streamed) if streamed else None
                 # 静默退回一次性请求。AttributeError 是为了兼容测试里
                 # 的假客户端和任何只实现了 complete() 的客户端——
                 # 没有流式能力应当退回，而不是让整轮任务崩掉。

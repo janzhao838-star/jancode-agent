@@ -345,6 +345,7 @@ class Client:
                     )
 
             lines = resp.aiter_lines()
+            no_content_since = time.monotonic()  # 排队心跳也算空等，统一计时
             while True:
                 # 拿内容之前给足时间（推理模型可能想很久才吐第一个字），
                 # 拿到内容之后只要静默 6 秒就判定模型已经说完、主动收尾。
@@ -353,6 +354,14 @@ class Client:
                 if not produced:
                     # 还没吐第一个字：推理模型可能要想很久，给足时间
                     idle = 120.0
+                    if time.monotonic() - no_content_since > 120.0:
+                        raise ProviderError(
+
+                            "网关超过 120 秒没有返回任何内容（一直在排队或挂死），已超时放弃"
+
+                        )
+
+                        break  # 120 秒没有一行真内容：网关挂死或排队无期
                 else:
                     # 已经吐过内容了，判断话是不是说完了：
                     # 以句末标点/换行收尾的，静默 2.5 秒就认定说完；
@@ -405,6 +414,7 @@ class Client:
                     piece = delta.get("content") or ""
                     if piece:
                         produced = True
+                        no_content_since = time.monotonic()
                         last_content = time.monotonic()
                         buf += piece
                         yield {"type": "text", "text": piece}
