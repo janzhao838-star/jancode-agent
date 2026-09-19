@@ -18,6 +18,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -418,9 +419,19 @@ class Toolbox:
             await asyncio.wait_for(asyncio.shield(pump), timeout=self.bash_timeout)
         except asyncio.TimeoutError:
             # 杀整组进程，别把 shell 的孙子们留在系统里。
+            # POSIX 用进程组；Windows 没有进程组（start_new_session 被忽略），
+            # 用 taskkill /T 杀整棵进程树。
+            killed = False
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
+                killed = True
             except (ProcessLookupError, PermissionError, AttributeError):
+                pass
+            if not killed and sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                               capture_output=True)
+                killed = True
+            if not killed:
                 try:
                     proc.kill()
                 except Exception:

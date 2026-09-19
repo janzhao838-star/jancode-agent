@@ -213,14 +213,15 @@ proc.stdout.readuntil(b"</html>"), timeout=BROWSER_TIMEOUT
         shutil.rmtree(profile, ignore_errors=True)
         return False, "Chrome 渲染超时（" + str(BROWSER_TIMEOUT) + " 秒），页面可能太重或网络太慢。"
     finally:
-        if proc.returncode is None:
+        # Windows 上 Chrome 是多进程的，还会留 crashpad 处理器：哪怕主进程
+        # 正常退出，残留子进程持有 stdout 管道，CI 步骤会挂到天荒地老。
+        # 所以 Windows 一律整树强杀，其他平台只在还活着时补一刀。
+        if sys.platform == "win32":
+            import subprocess as _sp
+            _sp.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                    capture_output=True)
+        elif proc.returncode is None:
             proc.kill()
-            # Windows 上 Chrome 是多进程的：只杀主进程会留下持有 stdout
-            # 管道的子进程，CI 步骤会因此挂到天荒地老。整树强杀并回收。
-            if sys.platform == "win32":
-                subprocess_run = __import__("subprocess").run
-                subprocess_run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                               capture_output=True)
         await proc.wait()
     shutil.rmtree(profile, ignore_errors=True)  # 临时 profile 用完就删
     dom = out.decode("utf-8", "replace")

@@ -103,7 +103,17 @@ def _save(path: Path, items: list[dict]) -> None:
         fh.write(text)
         fh.flush()
         os.fsync(fh.fileno())
-    os.replace(tmp, path)
+    # Windows 的 os.replace 在目标正被别的线程读时（Python 的 open 不带
+    # FILE_SHARE_DELETE）会报 WinError 5。并发读者只持有几毫秒，重试即可，
+    # 不能让「读到一半」把「写」顶崩。POSIX 上 replace 是原子的，不会遇到。
+    for attempt in range(20):
+        try:
+            os.replace(tmp, path)
+            break
+        except PermissionError:
+            if os.name != "nt" or attempt == 19:
+                raise
+            time.sleep(0.02)
 
 
 # ---------- 技能 ----------
