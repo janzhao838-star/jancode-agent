@@ -194,7 +194,29 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _guard(self) -> bool:
+        """
+        路站防护：浏览器里任何别的网页，都不许暱暱指挥本地智能体。原因有二：
+
+        1. Host 必须是本机回环地址：DNS 重绑定会把 Host 换成攻击者域名，放进来就等于把工作目录和密钥暴露给外网页面。但直接输入网址访问的用户， Host 总是回环地址，不会误伤。
+        2. POST 必须带 application/json：路站表单只能发 text/plain，正常界面一律发 JSON，误伤为零。
+        """
+        port = getattr(self.server, 'server_address', (None, 0))[1]
+        host = (self.headers.get('Host') or '').strip().lower()
+        ok_hosts = ('127.0.0.1:%d' % port, 'localhost:%d' % port)
+        if port and host not in ok_hosts:
+            self._send(403, b'forbidden', 'text/plain')
+            return False
+        if self.command == 'POST':
+            ctype = (self.headers.get('Content-Type') or '').split(';')[0].strip().lower()
+            if ctype != 'application/json':
+                self._send(415, b'json required', 'text/plain')
+                return False
+        return True
+
     def do_GET(self) -> None:
+        if not self._guard():
+            return
         if self.path in ("/", "/index.html"):
             self._send(200, _index_html(), "text/html; charset=utf-8")
             return
@@ -832,6 +854,8 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True})
 
     def do_POST(self) -> None:
+        if not self._guard():
+            return
         if self.path == "/api/notify":
             self._notify()
             return
@@ -888,10 +912,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
 
+        emit_ok = [True]  # 客户端断开后再 emit 只会接连抛错，不让它干扰后续清理
         def emit(obj: dict) -> None:
-            self.wfile.write((json.dumps(obj, ensure_ascii=False) + "\n").encode())
-            self.wfile.flush()
-
+            if not emit_ok[0]:
+                return
+            try:
+                self.wfile.write((json.dumps(obj, ensure_ascii=False) + "\n").encode())
+                self.wfile.flush()
+            except OSError:
+                emit_ok[0] = False
         # 本次任务用哪个角色、哪个模型、带哪些技能。
         # 一律走 dataclasses.replace，不就地改 self.config —— 那是所有请求共用的，
         # 改了会串到别的任务上。
