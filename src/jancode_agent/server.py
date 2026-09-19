@@ -530,6 +530,46 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True})
             return
 
+        if action == "probe":
+            # 测活：真实请求一次该提供商的 /models，量延迟、看模型列表。
+            # 为什么不用假请求：AionClaw 的 relayTestModel 语义就是
+            # 「拿真实接口说话」，配置对不对一试便知。
+            row = next((i for i in items if i["name"] == name), None)
+            if row is None:
+                self._json({"ok": False, "error": "没有这套接入配置"})
+                return
+            import time as _time
+
+            import httpx
+
+            base = (row.get("base_url") or "").rstrip("/")
+            if not base:
+                self._json({"ok": False, "error": "这套配置没有填地址"})
+                return
+            t0 = _time.monotonic()
+            try:
+                resp = httpx.get(
+                    base + "/models",
+                    headers={"Authorization": "Bearer " + (row.get("api_key") or "")},
+                    timeout=15.0,
+                )
+            except httpx.HTTPError as exc:
+                self._json({"ok": False, "error": "连不上：" + str(exc)[:200]})
+                return
+            ms = int((_time.monotonic() - t0) * 1000)
+            if resp.status_code >= 400:
+                self._json({"ok": False,
+                            "error": "HTTP " + str(resp.status_code) + "（密钥可能不对）",
+                            "ms": ms})
+                return
+            ids = []
+            try:
+                ids = [str(m.get("id") or "") for m in resp.json().get("data", [])]
+            except ValueError:
+                pass
+            self._json({"ok": True, "ms": ms, "models": ids[:20]})
+            return
+
         if action == "activate":
             if name not in {i["name"] for i in items}:
                 self._json({"ok": False, "error": "没有这套接入配置"})

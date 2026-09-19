@@ -1697,6 +1697,22 @@ main,.main,#main{overflow:hidden}
         f.querySelector('#mg-key').placeholder='留空表示不改密钥';
         f.querySelector('#mg-vhint').textContent='密钥留空即不修改';
       };
+      var ping=el('button','mg-abtn','测活');
+      ping.onclick=function(){
+        ping.textContent='测活中…';ping.disabled=true;
+        api('/api/providers',{action:'probe',name:p.name}).then(function(r){
+          ping.disabled=false;
+          if(r.ok){
+            ping.textContent='通 '+r.ms+'ms';
+            if(r.models&&r.models.length&&r.models.indexOf(p.model)<0){
+              ping.title='注意：'+p.model+' 不在服务端列表里（列表：'+r.models.join('、')+'）';
+            } else { ping.title='模型列表：'+(r.models||[]).join('、'); }
+          } else {
+            ping.textContent='不通';ping.title=r.error||'';
+          }
+        }).catch(function(){ping.disabled=false;ping.textContent='不通';});
+      };
+      c.appendChild(ping);
       c.appendChild(edit);
       if(!p.is_active){
         var act=el('button','mg-abtn','启用');
