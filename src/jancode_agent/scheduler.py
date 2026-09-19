@@ -82,7 +82,14 @@ def next_run(schedule: str, last_run: float, now: float | None = None) -> float 
     daily = parse_daily(schedule)
     if daily is not None:
         hour, minute = daily
-        base = datetime.fromtimestamp(last_run or now)
+        # 锚点不能落在 epoch 之前：server 校验写法时会传 (0, 0)，
+        # fromtimestamp(0) 得到 1970 年，后面 .timestamp() 是负数，
+        # Windows 的 localtime 不认负时间戳，直接 OSError 22。
+        # 把 2001 年之前一律当「从没跑过」钳到不早于 epoch+1 天。
+        anchor = last_run or now
+        if anchor < 1e9:
+            anchor = max(now, 86400.0)
+        base = datetime.fromtimestamp(anchor)
         when = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if when.timestamp() <= (last_run or now - 86400):
             when += timedelta(days=1)
