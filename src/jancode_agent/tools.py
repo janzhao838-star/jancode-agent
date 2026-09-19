@@ -43,7 +43,7 @@ class ToolError(Exception):
 
 
 # 「只读」类工具：不产生任何副作用，计划/只读模式下放行。
-READ_ONLY_TOOLS = frozenset({"read_file", "list_dir", "grep"})
+READ_ONLY_TOOLS = frozenset({"read_file", "list_dir", "grep", "web_get", "browser_read"})
 
 # 这两种模式在代码层面禁止一切有副作用的工具。
 NO_SIDE_EFFECT_MODES = frozenset({"readonly", "plan"})
@@ -85,6 +85,8 @@ class Toolbox:
         self.allow_subagents = allow_subagents
         self.spawn_subagent = spawn_subagent
         self.mode = (mode or "auto").strip().lower()
+        # 浏览器后台标签页登记：本智能体开的标签自己记着、自己收尾。
+        self._browser_tabs: list[int] = []
 
     # ---------- 工作模式（代码级拦截） ----------
 
@@ -543,7 +545,30 @@ class Toolbox:
                     ),
                 },
             },
-        ]
+        {
+            "type": "function",
+            "function": {
+                "name": "web_get",
+                "description": (
+                    """抓取一个网页并提取正文（自动剥掉脚本和样式）。适合静态页面、
+                    文档和 JSON 接口。只支持 http(s) 地址。需要执行页面 JS 才有
+                    内容的页面改用 browser_read。"""
+                ),
+                "parameters": obj({"url": {"type": "string", "description": "完整 http(s) 网址"}}, ["url"]),
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "browser_read",
+                "description": (
+                    """用无头 Chrome 渲染网页后提取正文。比 web_get 慢几秒，但能执行
+                    页面脚本，适合单页应用和「渲染后才有内容」的页面。只读不交互：
+                    它不能点击、输入或登录。"""
+                ),
+                "parameters": obj({"url": {"type": "string", "description": "完整 http(s) 网址"}}, ["url"]),
+            },
+        },        ]
         if self.allow_subagents:
             tools.append({
                 "type": "function",
@@ -601,6 +626,20 @@ class Toolbox:
                 },
             })
         return tools
+
+    async def web_get(self, url: str = "", **extra: Any) -> ToolResult:
+        """直接抓取网页正文。实现在 browser 模块，这里只做转发。"""
+        from .browser import web_get as _web_get
+
+        ok, output = await _web_get(url)
+        return ToolResult(ok, output)
+
+    async def browser_read(self, url: str = "", **extra: Any) -> ToolResult:
+        """无头 Chrome 渲染后取正文。实现在 browser 模块，这里只做转发。"""
+        from .browser import browser_read as _browser_read
+
+        ok, output = await _browser_read(url)
+        return ToolResult(ok, output)
 
     async def save_skill(self, name: str = "", content: str = "", **extra: Any) -> ToolResult:
         denial = self.policy_error("save_skill")
