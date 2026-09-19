@@ -2735,7 +2735,8 @@ main,.main,#main{overflow:hidden}
   function post(d){return fetch("/api/agents",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){return r.json();});}
   function curMode(){
     return fetch("/api/settings").then(function(r){return r.json();}).then(function(d){
-      return (d&&d.settings&&d.settings.active_mode)||"auto";});
+      window.__activePreset=(d&&d.active_preset)||"";
+      return (d&&(d.active_mode||(d.settings&&d.settings.active_mode)))||"auto";});
   }
   function render(){
     body.innerHTML="";
@@ -2756,7 +2757,7 @@ main,.main,#main{overflow:hidden}
         head.appendChild(el("span","mg-tile",p.emoji||"◆"));
         head.appendChild(el("span","ps-name",p.name));
         head.appendChild(el("span","ps-in","内置"));
-        if((p.mode||"auto")===mode)c.appendChild(el("span","ps-cur","当前使用"));
+        if((window.__activePreset||"")===p.name)c.appendChild(el("span","ps-cur","当前使用"));
         c.appendChild(head);
         c.appendChild(el("div","ps-desc",p.description||""));
         c.appendChild(el("div","ps-key",(p.mode||"auto")+(p.system_prompt?" · 自定义提示词":"")));
@@ -2764,7 +2765,7 @@ main,.main,#main{overflow:hidden}
         var b1=el("button","mg-btn","使用");
         b1.onclick=function(e){e.stopPropagation();
           post({use_preset:p.name}).then(function(d){
-            if(d&&d.ok!==false&&window.syncModeWidget)window.syncModeWidget();
+            if(d&&d.ok!==false){window.__activePreset=p.name;if(window.syncModeWidget)window.syncModeWidget();}
             alert(d&&d.ok===false?("切换失败："+(d.error||"未知原因")):"已切换到「"+p.name+"」");render();});};
         var b2=el("button","mg-btn","复制为智能体");
         b2.onclick=function(e){e.stopPropagation();

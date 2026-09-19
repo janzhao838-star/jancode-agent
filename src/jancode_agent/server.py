@@ -382,6 +382,7 @@ class Handler(BaseHTTPRequestHandler):
         # desktop-settings.json 的 active_mode，/api/run 每次读它作兜底。
         saved = _saved_settings()
         saved["active_mode"] = preset["mode"]
+        saved["active_preset"] = preset["name"]  # preset page badge lights by name
         prompt = preset.get("system_prompt")
         if prompt:
             saved["preset_prompt"] = prompt
@@ -636,6 +637,7 @@ class Handler(BaseHTTPRequestHandler):
             # 界面的模式控件和预设页要显示当前真实模式，没这个字段它们
             # 只能各自显示默认值，用户切了预设界面却纹丝不动，像坏了。
             "active_mode": str(_saved_settings().get("active_mode") or "")[:16],
+            "active_preset": str(_saved_settings().get("active_preset") or "")[:40],
             "max_steps": self.config.max_steps,
         })
 
