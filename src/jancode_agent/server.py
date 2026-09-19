@@ -739,6 +739,10 @@ class Handler(BaseHTTPRequestHandler):
         # 当前配置的模型永远排在最前，即使接口不返回清单也能选它。
         if p.model:
             ids.insert(0, p.model)
+        # 所有接入配置的默认模型都进下拉：选了哪套的模型，任务就自动整套切到哪套。
+        for prow in load_providers()[0]:
+            if prow.get("model") and prow["model"] not in ids:
+                ids.append(prow["model"])
         seen = set()
         ids = [x for x in ids if not (x in seen or seen.add(x))]
 
@@ -923,7 +927,13 @@ class Handler(BaseHTTPRequestHandler):
             config = replace(config, system_extra=skills_section())
 
         if model and model != config.provider.model:
-            config = replace(config, provider=replace(config.provider, model=model))
+            # 模型名属于哪套接入配置，就整套换过去：base_url 和密钥跟着走，
+            # 否则选了另一套配置的模型，请求还打在当前中转站上，必然 404/401。
+            hit = next((r for r in load_providers()[0] if r.get("model") == model), None)
+            if hit is not None:
+                config = replace(config, provider=provider_config(config, hit).provider)
+            else:
+                config = replace(config, provider=replace(config.provider, model=model))
         if effort:
             config = replace(config, provider=replace(config.provider, effort=effort))
 
