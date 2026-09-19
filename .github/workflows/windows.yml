@@ -1,0 +1,30 @@
+name: windows-tests
+
+# Windows 后台测试：GitHub 云 runner 就是测试环境，不用本地装 Windows。
+# 跑全套 pytest + crosscheck + smoke（smoke 里跳过 mac 专属部分）。
+# 另外 browser_read 在 Windows 上找不到 Chrome 会返回人话错误，
+# 测试对这条路径有断言，正好验证跨平台降级逻辑。
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[dev]"
+      - name: Crosscheck
+        run: python scripts/crosscheck.py
+      - name: Pytest
+        run: python -m pytest tests/ -q
+      - name: Smoke
+        shell: bash
+        run: python scripts/smoke.py
