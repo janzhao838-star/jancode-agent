@@ -193,13 +193,10 @@ class MCPClient:
         while time.time() < deadline:
             # readline 本身没有超时：进程活着但一直不输出的话（比如手滑
             # 填了个 sleep、或某个不说话的 GUI 程序），这里会永久挂住，
-            # deadline 永远检查不到。先用 select 等数据到达再读。
-            import select
-            ready, _, _ = select.select([self.proc.stdout], [], [],
-                                        max(0.0, deadline - time.time()))
-            if not ready:
-                break
-            line = self.proc.stdout.readline()
+            # deadline 永远检查不到。先确认有数据到达再读。
+            line = self._readline_guarded(deadline)
+            if line is None:
+                break  # 超时
             if not line:
                 raise MCPError("服务已退出" + (": " + self.stderr_tail() if self._stderr else ""))
             line = line.strip()
@@ -210,6 +207,43 @@ class MCPClient:
             except json.JSONDecodeError:
                 continue
         raise MCPError(f"等待回复超时（{self.timeout:.0f} 秒）")
+
+    def _readline_guarded(self, deadline: float) -> str | None:
+        """带 deadline 读一行。返回 None 表示超时，'' 表示流已关。
+
+        POSIX 用 select 等数据；Windows 的 select 只认 socket，传管道
+        直接 WinError 10038，所以换成读线程 + 到点杀进程：进程一死
+        readline 立即返回，不会真等满 deadline。
+        """
+        if os.name != "nt":
+            import select
+            ready, _, _ = select.select([self.proc.stdout], [], [],
+                                        max(0.0, deadline - time.time()))
+            if not ready:
+                return None
+            return self.proc.stdout.readline()
+        import threading
+        done = threading.Event()
+        box: list[str] = []
+
+        def _read():
+            try:
+                box.append(self.proc.stdout.readline())
+            except Exception:
+                box.append("")
+            done.set()
+
+        reader = threading.Thread(target=_read, daemon=True)
+        reader.start()
+        if not done.wait(max(0.0, deadline - time.time())):
+            try:
+                if self.proc and self.proc.poll() is None:
+                    self.proc.kill()
+            except Exception:
+                pass
+            reader.join(timeout=2)
+            return None
+        return box[0] if box else ""
 
     def _rpc(self, method: str, params: dict) -> dict:
         with self._lock:

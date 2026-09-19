@@ -16,6 +16,13 @@ import pytest
 
 from jancode_agent.config import load_config
 
+# 被测对象是 POSIX bash 脚本。Windows runner 没有 WSL 时，System32 的
+# bash.exe 是个占位 stub，只会吐一条 UTF-16 的「未安装发行版」提示，
+# 这些端到端测试在那种环境下测不了——跳过而不是误报。
+pytestmark = pytest.mark.skipif(
+    os.name == "nt",
+    reason="setup-jancode.sh 是 POSIX bash 脚本；无 WSL 的 Windows 环境跑不了")
+
 
 @pytest.fixture()
 def relay(tmp_path):

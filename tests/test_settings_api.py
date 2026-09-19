@@ -52,7 +52,10 @@ def test_保存设置落盘且权限600(server, monkeypatch):
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["api_key"] == "sk-new"
     mode = stat.S_IMODE(path.stat().st_mode)
-    assert mode == 0o600, f"设置文件里有密钥，权限必须 600，实际 {oct(mode)}"
+    import os
+    if os.name == "posix":
+        # Windows 不支持 POSIX 权限位，chmod 600 后 stat 仍报 0o666。
+        assert mode == 0o600, f"设置文件里有密钥，权限必须 600，实际 {oct(mode)}"
 
 
 def test_保存后当前进程立刻生效(server, monkeypatch):

@@ -23,6 +23,7 @@ import asyncio
 import os
 import re
 import shutil
+import sys
 import tempfile
 from html.parser import HTMLParser
 
@@ -149,12 +150,16 @@ def _find_chrome() -> str | None:
     """找到可用的 Chrome。找不到就明说，别报一个莫名其妙的 FileNotFoundError。"""
     for cand in (
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "C:/Program Files/Google/Chrome/Application/chrome.exe" if sys.platform == "win32" else "",
+        "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe" if sys.platform == "win32" else "",
         shutil.which("google-chrome") or "",
         shutil.which("google-chrome-stable") or "",
         shutil.which("chrome") or "",
         shutil.which("chromium") or "",
     ):
-        if cand and (cand.startswith("/") and os.path.exists(cand) or shutil.which(cand)):
+        # 统一用 isfile 判断：绝对路径（mac 的 .app、Windows 的 Program Files）
+        # 和 PATH 里的名字都覆盖，不靠 startswith("/") 这种 POSIX 假设。
+        if cand and os.path.isfile(cand):
             return cand
     return None
 
@@ -210,6 +215,13 @@ proc.stdout.readuntil(b"</html>"), timeout=BROWSER_TIMEOUT
     finally:
         if proc.returncode is None:
             proc.kill()
+            # Windows 上 Chrome 是多进程的：只杀主进程会留下持有 stdout
+            # 管道的子进程，CI 步骤会因此挂到天荒地老。整树强杀并回收。
+            if sys.platform == "win32":
+                subprocess_run = __import__("subprocess").run
+                subprocess_run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                               capture_output=True)
+        await proc.wait()
     shutil.rmtree(profile, ignore_errors=True)  # 临时 profile 用完就删
     dom = out.decode("utf-8", "replace")
     if not dom.strip():

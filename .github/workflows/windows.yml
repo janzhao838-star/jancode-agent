@@ -12,6 +12,7 @@ on:
 jobs:
   windows:
     runs-on: windows-latest
+    timeout-minutes: 20  # 不设就吃 GH 默认 6 小时：曾因孤儿进程占着管道挂满 6 小时才被杀
     env:
       PYTHONUTF8: "1"
     steps:

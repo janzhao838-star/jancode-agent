@@ -24,6 +24,9 @@ def api(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    # Windows 的 Path.home() 走 USERPROFILE，不认 HOME——两个都指向临时目录，
+    # 否则测试里读 Path.home() 会读到 runner 的真实家目录。
+    monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("JANCODE_AGENT_CONFIG", str(home / "config.toml"))
     # 库模块的路径是 import 时算好的，要跟着 HOME 走
     from jancode_agent import library

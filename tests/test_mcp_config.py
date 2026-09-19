@@ -41,9 +41,13 @@ def test_save收紧权限且能回读(monkeypatch, tmp_path):
     monkeypatch.setattr(mcp, "CONFIG_PATH", p)
     mcp.save_servers([{"name": "fs", "command": "npx", "args": ["-y", "x"],
                        "env": {"K": "V"}, "enabled": False}])
+    import os
     import stat
     mode = stat.S_IMODE(p.stat().st_mode)
-    assert mode == 0o600, f"mcp.json 里有服务端密钥，权限必须是 600，实际 {oct(mode)}"
+    if os.name == "posix":
+        # Windows 的 FAT/NTFS 不支持 POSIX 权限位，chmod 600 后 stat
+        # 仍报 0o666，这条断言只在 POSIX 上有意义。
+        assert mode == 0o600, f"mcp.json 里有服务端密钥，权限必须是 600，实际 {oct(mode)}"
     assert mcp.load_servers()[0]["enabled"] is False
 
 
