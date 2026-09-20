@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import threading
@@ -272,6 +273,21 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/sessions":
             self._sessions_get()
+            return
+        if self.path.startswith("/api/attachment?"):
+            from urllib.parse import parse_qs, urlparse
+
+            q = parse_qs(urlparse(self.path).query)
+            from .attachments import data_uri
+
+            try:
+                uri = data_uri((q.get("id") or [""])[0])
+                head, _, b64 = uri.partition("base64,")
+                import base64 as _b64
+                mime = head[5:].partition(";")[0]
+                self._send(200, _b64.b64decode(b64), mime)
+            except ValueError as exc:
+                self._send(404, str(exc).encode(), "text/plain; charset=utf-8")
             return
         if self.path == "/api/skills":
             from dataclasses import asdict
@@ -741,6 +757,28 @@ class Handler(BaseHTTPRequestHandler):
         """会话存档文件。测试用 build_server(sessions_path=...) 指到临时目录。"""
         return getattr(Handler, "sessions_path", None) or SESSIONS_PATH
 
+    def _attachments_post(self) -> None:
+        """收一张图：base64 进，内容寻址引用出。准入不过就给人话错误。"""
+        from .attachments import store_image
+
+        try:
+            payload = json.loads(
+                self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+        except (ValueError, UnicodeDecodeError):
+            self._json({"ok": False, "error": "请求体不是 JSON"}, 400)
+            return
+        try:
+            raw = base64.b64decode(str(payload.get("data") or ""))
+        except (ValueError, TypeError):
+            self._json({"ok": False, "error": "data 不是合法 base64"})
+            return
+        try:
+            ref = store_image(raw)
+        except ValueError as exc:
+            self._json({"ok": False, "error": str(exc)})
+            return
+        self._json({"ok": True, **ref})
+
     def _sessions_get(self) -> None:
         """读会话存档。没有就给空档，前端照常工作。"""
         from .sessions import load_store
@@ -984,6 +1022,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/sessions":
             self._sessions_post()
             return
+        if self.path == "/api/attachments":
+            self._attachments_post()
+            return
         if self.path in ("/api/steer", "/api/stop"):
             self._steer_or_stop(self.path == "/api/stop")
             return
@@ -999,11 +1040,22 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         prompt = str(payload.get("prompt") or "").strip()
-        if not prompt:
+        if not prompt and not payload.get("images"):
             self._send(400, b'{"error":"\\u4efb\\u52a1\\u4e0d\\u80fd\\u4e3a\\u7a7a"}', "application/json")
             return
 
         history = payload.get("history") or []
+
+        # 消息附件：随消息带的图，转成 data URI 交给模型。
+        # 引用不合法或附件被清理时直接报错，不让坏请求流进 Agent 循环。
+        prompt_images = []
+        if payload.get("images"):
+            from .attachments import resolve_images
+            try:
+                prompt_images = resolve_images(payload.get("images"))
+            except ValueError as exc:
+                self._json({"ok": False, "error": str(exc)}, 400)
+                return
 
         # 这一轮的运行句柄：插话和停止靠它找到正在跑的 Agent。
         run_id = str(payload.get("run_id") or "")
@@ -1126,6 +1178,7 @@ class Handler(BaseHTTPRequestHandler):
                 prompt,
                 inbox=handle["inbox"] if handle else None,
                 stop=handle["stop"] if handle else None,
+                images=prompt_images,
             ):
                     if step.kind == "answer" and not step.subagent:
                         # 流式下回答是分多块来的：增量要累加，

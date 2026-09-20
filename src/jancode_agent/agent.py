@@ -369,14 +369,18 @@ class Agent:
 
     # ---------- 主循环 ----------
 
-    async def run(self, prompt: str, inbox=None, stop=None) -> AsyncIterator[Step]:
+    async def run(self, prompt: str, inbox=None, stop=None, images=None) -> AsyncIterator[Step]:
         """inbox 收到用户插话就中断当前生成、带修正重新作答；stop 置位就收工。"""
-        """跑一轮完整任务。以异步生成器形式产出每一步，便于实时显示。"""
+        """跑一轮完整任务。以异步生成器形式产出每一步，便于实时显示。
+
+        images 是 data URI 列表（消息附件）：有图的用户消息走多模态分段，
+        模型才能真正「看见」，这是消息附件的整条链路终点。
+        """
         if self._client is None:
             self._client = Client(self.config.provider)
             await self._client.__aenter__()
 
-        self.messages.append(Message(role="user", content=prompt))
+        self.messages.append(Message(role="user", content=prompt, images=list(images or [])))
         # MCP 服务是按需启动的子进程，npx 冷启动要几秒到几十秒。
         # 直接在事件循环里调用会把整个任务堵住（对外表现就是「一直执行中」），
         # 所以丢到线程里去等。

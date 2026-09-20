@@ -113,6 +113,10 @@ header .sp{flex:1}
        padding:12px 14px 10px;box-shadow:var(--pri-glow);transition:border-color .15s,box-shadow .15s}
 .cwrap:focus-within{border-color:#ffb8a0;box-shadow:0 12px 34px rgba(255,99,57,.16)}
 textarea{width:100%;min-height:64px;max-height:240px;resize:vertical;background:transparent;
+#attBar{display:none}
+#attBar .att-chip{position:relative;display:inline-block}
+#attBar .att-chip img{width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--line,#ddd);display:block}
+#attBar .att-chip a{position:absolute;top:-6px;right:-6px;width:18px;height:18px;line-height:16px;text-align:center;border-radius:50%;background:#c0392b;color:#fff;font-size:12px;cursor:pointer;text-decoration:none}
          color:var(--ink);border:0;outline:none;padding:4px 4px 0;font:inherit}
 .crow{display:flex;align-items:center;gap:10px;margin-top:6px}
 .crow .hint{color:var(--mut2);font-size:11.5px;flex:1}
@@ -301,7 +305,8 @@ button.primary:disabled{opacity:.45;cursor:default}
     <div id="log"></div>
   <div class="composer">
     <div class="cwrap">
-      <textarea id="input" placeholder="今天帮你做些什么？请输入（Enter 发送，Shift+Enter 换行）"></textarea>
+      <div id="attBar" style="display:none;gap:8px;flex-wrap:wrap;padding:6px 2px"></div>
+      <textarea id="input" placeholder="今天帮你做些什么？可拖图或直接粘贴截图（Enter 发送，Shift+Enter 换行）"></textarea>
       <div class="crow">
         <span class="chipbtn" id="modelBtn" title="点这里换模型">
           <span id="modelName">模型加载中…</span><span class="ar">▾</span>
@@ -579,6 +584,18 @@ button.primary:disabled{opacity:.45;cursor:default}
     var you = document.createElement("div");
     you.className = "you"; you.textContent = t.prompt;
     el.appendChild(you);
+    // 消息附件的缩略图：让用户确认自己发的图确实跟着这条消息走了
+    if (t.images && t.images.length) {
+      var imgs = document.createElement("div");
+      imgs.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;margin:4px 0";
+      for (var ii = 0; ii < t.images.length; ii++) {
+        var im = document.createElement("img");
+        im.src = "/api/attachment?id=" + encodeURIComponent(t.images[ii]);
+        im.style.cssText = "width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--line,#ddd)";
+        imgs.appendChild(im);
+      }
+      el.appendChild(imgs);
+    }
     if (t.answer) {
       var ans = document.createElement("div");
       ans.className = "ans"; ans.textContent = t.answer;
@@ -648,7 +665,7 @@ button.primary:disabled{opacity:.45;cursor:default}
   // 两轮同时跑会互相覆盖，第二轮的回答写进第一轮的格子，看起来像没反应。
   // 排队的体感一样（消息立刻进列表），但渲染不会串。
   var mgQueue = [];
-  function run(prompt) {
+  function run(prompt, images) {
     if (busy || live) {
       // 插话：立刻送进正在跑的那一轮，不是排队。
       // Agent 循环收到后会在下一个事件处中断当前生成，带着这条修正重答。
@@ -668,7 +685,7 @@ button.primary:disabled{opacity:.45;cursor:default}
       }).catch(function (e) { hint.textContent = "插话失败：" + e.message; });
       return;
     }
-    return runNow(prompt);
+    return runNow(prompt, images);
   }
   async function mgDrain() {
     if (busy || live || !mgQueue.length) return;
@@ -681,12 +698,12 @@ button.primary:disabled{opacity:.45;cursor:default}
     await runNow(next);
   }
 
-  async function runNow(prompt) {
+  async function runNow(prompt, images) {
     // 允许插话：运行中也能继续发。上一版只解禁了按钮，没动这里，
     // 所以点得动但发不出去——闸门在这个 busy 判断上。
     // 服务端是多线程的，能同时跑多轮；发送按钮的禁用状态也已不再拦。
-    if (!prompt) return;
-    var turn = { prompt: prompt, answer: "", tools: [], error: "", status: "", ts: Date.now() };
+    if (!prompt && !(images && images.length)) return;
+    var turn = { prompt: prompt || "（见附图）", answer: "", tools: [], error: "", status: "", ts: Date.now(), images: images || [] };
     pushTurn(turn);
     // 新的一次运行：服务端会新建 Agent，运行内基线必须清零，
     // 否则第二轮的增量算不出来（两轮的 turns 可能都是 1）。
@@ -708,7 +725,7 @@ button.primary:disabled{opacity:.45;cursor:default}
         method: "POST",
         signal: ctrl ? ctrl.signal : undefined,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: prompt, history: history(), model: store.model || "", agent: store.agent || "", run_id: runId })
+        body: JSON.stringify({ prompt: prompt, images: images || [], history: history(), model: store.model || "", agent: store.agent || "", run_id: runId })
       });
       if (!res.ok) {
         var msg = "服务返回 " + res.status;
@@ -869,11 +886,58 @@ button.primary:disabled{opacity:.45;cursor:default}
     }).catch(function () {});
   }
 
+  // ---------- 消息附件：拖图/贴图进对话 ----------
+  var pendingImages = [];
+  function renderPend() {
+    var bar = $("attBar");
+    if (!bar) return;
+    if (!pendingImages.length) { bar.innerHTML = ""; bar.style.display = "none"; return; }
+    bar.style.display = "flex";
+    var h = "";
+    for (var i = 0; i < pendingImages.length; i++) {
+      h += String.fromCharCode(60) + "span class=\"att-chip\"><img src=\"/api/attachment?id=" + encodeURIComponent(pendingImages[i]) + "\"><a data-rm=\"" + i + "\">×</a></span>";
+    }
+    bar.innerHTML = h;
+    var rms = bar.querySelectorAll("[data-rm]");
+    for (var j = 0; j < rms.length; j++) { (function (btn) {
+      btn.onclick = function () { pendingImages.splice(Number(btn.getAttribute("data-rm")), 1); renderPend(); };
+    })(rms[j]); }
+  }
+  function addImageFile(file) {
+    if (!file || file.type.indexOf("image/") !== 0) { hint.textContent = "只支持图片附件"; return; }
+    var rd = new FileReader();
+    rd.onload = function () {
+      var b64 = String(rd.result).split(",")[1] || "";
+      hint.textContent = "正在添加图片…";
+      fetch("/api/attachments", { method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: b64, name: file.name })
+      }).then(function (r) { return r.json(); }).then(function (d) {
+        if (d.ok) { pendingImages.push(d.id); renderPend(); hint.textContent = "图片已就绪，随下一条消息发送"; }
+        else hint.textContent = d.error || "图片添加失败";
+      }).catch(function () { hint.textContent = "图片添加失败：连不上本地服务"; });
+    };
+    rd.readAsDataURL(file);
+  }
+  input.addEventListener("paste", function (e) {
+    var items = (e.clipboardData || {}).items || [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].kind === "file") { var f = items[i].getAsFile(); if (f) addImageFile(f); }
+    }
+  });
+  input.addEventListener("dragover", function (e) { e.preventDefault(); });
+  input.addEventListener("drop", function (e) {
+    e.preventDefault();
+    if (e.dataTransfer) { for (var i = 0; i < e.dataTransfer.files.length; i++) addImageFile(e.dataTransfer.files[i]); }
+  });
+
   sendBtn.onclick = function () {
     var v = input.value.trim();
-    if (!v) return;
+    if (!v && !pendingImages.length) return;
+    var imgs = pendingImages.slice();
     input.value = "";
-    run(v);
+    pendingImages = []; renderPend();
+    run(v, imgs);
   };
   input.onkeydown = function (e) {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendBtn.onclick(); }
