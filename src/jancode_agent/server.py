@@ -38,6 +38,9 @@ WEB_DIR = Path(__file__).parent / "web"
 # 文件能收紧到 600。
 SETTINGS_PATH = Path.home() / ".jancode-agent" / "desktop-settings.json"
 
+# 会话存档：界面历史的服务端副本。浏览器存储会被清，这里不会。
+SESSIONS_PATH = Path.home() / ".jancode-agent" / "sessions.json"
+
 
 def _settings_path() -> Path:
     return getattr(Handler, "settings_path", None) or SETTINGS_PATH
@@ -266,6 +269,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/tools":
             self._tools()
+            return
+        if self.path == "/api/sessions":
+            self._sessions_get()
             return
         if self.path == "/api/skills":
             from dataclasses import asdict
@@ -729,6 +735,38 @@ class Handler(BaseHTTPRequestHandler):
             "max_steps": self.config.max_steps,
         })
 
+    # ---------- 会话持久化 ----------
+
+    def _sessions_path(self) -> Path:
+        """会话存档文件。测试用 build_server(sessions_path=...) 指到临时目录。"""
+        return getattr(Handler, "sessions_path", None) or SESSIONS_PATH
+
+    def _sessions_get(self) -> None:
+        """读会话存档。没有就给空档，前端照常工作。"""
+        from .sessions import load_store
+
+        self._json({"ok": True, "store": load_store(self._sessions_path())})
+
+    def _sessions_post(self) -> None:
+        """保存会话存档（界面每次改动后同步一份过来）。"""
+        from .sessions import save_store
+
+        try:
+            payload = json.loads(
+                self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+        except (ValueError, UnicodeDecodeError):
+            self._json({"ok": False, "error": "请求体不是 JSON"}, 400)
+            return
+        if not isinstance(payload, dict):
+            self._json({"ok": False, "error": "请求体不是对象"}, 400)
+            return
+        try:
+            store = save_store(self._sessions_path(), payload.get("store"))
+        except ValueError as exc:
+            self._json({"ok": False, "error": str(exc)})
+            return
+        self._json({"ok": True, "count": len(store["list"])})
+
     def _save_settings(self) -> None:
         """保存界面里填的连接设置，并让它在当前进程立即生效。"""
         try:
@@ -943,6 +981,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/automations":
             self._edit_automation()
             return
+        if self.path == "/api/sessions":
+            self._sessions_post()
+            return
         if self.path in ("/api/steer", "/api/stop"):
             self._steer_or_stop(self.path == "/api/stop")
             return
@@ -1137,7 +1178,8 @@ def build_server(host: str = "127.0.0.1", port: int = 8765, workspace: Path | No
                  provider: str | None = None,
                  config: AgentConfig | None = None,
                  require_key: bool = True,
-                 settings_path: Path | None = None) -> ThreadingHTTPServer:
+                 settings_path: Path | None = None,
+                 sessions_path: Path | None = None) -> ThreadingHTTPServer:
     """装配好配置、建好服务，但**不启动**。
 
     把「建」和「跑」分开是为了桌面版：它要在后台线程里跑 serve_forever，
@@ -1150,6 +1192,7 @@ def build_server(host: str = "127.0.0.1", port: int = 8765, workspace: Path | No
     # 测试/冒烟把设置文件指到临时目录，POST /api/settings 才不会把假配置
     # 写进用户真实的 desktop-settings.json。
     Handler.settings_path = settings_path
+    Handler.sessions_path = sessions_path
     Handler.config = config or load_config(
         provider_name=provider, workspace=workspace or Path.cwd())
     if require_key and not Handler.config.provider.api_key:

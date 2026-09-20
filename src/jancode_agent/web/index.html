@@ -400,7 +400,23 @@ button.primary:disabled{opacity:.45;cursor:default}
     if (typeof raw.hook !== "string") raw.hook = "";
     return raw;
   }
-  function save() { try { localStorage.setItem("jancode.sessions", JSON.stringify(store)); } catch (e) {} }
+  // 会话持久化：localStorage 之外再同步一份到本地服务。
+  // 浏览器存储会被「清除浏览数据」抹掉，服务端的文件不会。
+  // 防抖 600ms：一轮对话里 save() 要被调好多次，不打到服务端那么勤。
+  var syncTimer = null;
+  function queueSync() {
+    if (syncTimer) clearTimeout(syncTimer);
+    syncTimer = setTimeout(function () {
+      syncTimer = null;
+      try {
+        fetch("/api/sessions", { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ store: { list: store.list, current: store.current } })
+        }).catch(function () {});
+      } catch (e) {}
+    }, 600);
+  }
+  function save() { try { localStorage.setItem("jancode.sessions", JSON.stringify(store)); } catch (e) {} queueSync(); }
   function find(id) { for (var i = 0; i < store.list.length; i++) if (store.list[i].id === id) return store.list[i]; return null; }
   function esc(s) {
     return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
@@ -425,6 +441,25 @@ button.primary:disabled{opacity:.45;cursor:default}
     if (!d.has_key) hint.textContent = "还没有配置密钥：点右下角「设置」填上接口地址和密钥";
     renderSide(); renderMain();
   }).catch(function () { hint.textContent = "无法连接本地服务"; });
+
+  // 开局从服务端捞一份历史合并进来：localStorage 被清过、或者第一次在
+  // 这台机器上打开时，之前存在服务端的对话还能找回来。
+  // 同 id 以本地为准（它每次保存都在写，最多和服务端一样新）。
+  fetch("/api/sessions").then(function (r) { return r.json(); }).then(function (d) {
+    if (!d || !d.ok || !d.store || !Array.isArray(d.store.list) || !d.store.list.length) return;
+    var byId = {};
+    for (var i = 0; i < d.store.list.length; i++) byId[d.store.list[i].id] = d.store.list[i];
+    for (var j = 0; j < store.list.length; j++) byId[store.list[j].id] = store.list[j];
+    var merged = [];
+    for (var k in byId) if (Object.prototype.hasOwnProperty.call(byId, k)) merged.push(byId[k]);
+    merged.sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
+    store.list = merged;
+    if (!store.current || !byId[store.current]) {
+      store.current = d.store.current || (merged[0] && merged[0].id) || null;
+    }
+    cur = store.current ? find(store.current) : cur;
+    save(); renderSide(); renderMain();
+  }).catch(function () {});
 
   function modelLabel() { return store.model || info.model || "默认模型"; }
 
