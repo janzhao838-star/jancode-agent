@@ -207,6 +207,9 @@ class Agent:
                     f"{head}\n…【已自动归档：原输出约 {omitted} 字，此处只保留开头。"
                     f"需要完整内容时重新执行 {tool_name}，或用 read_file 看源头文件。】"
                 )
+                # 归档的同时把随消息带的图片一并卸下：被归档的旧图片
+                # 留在上下文里只会白烧 token，真要看再调 read_image。
+                m.images = []
                 archived += 1
             elif m.role == "assistant" and len(m.content) > ARCHIVE_ASSISTANT_MAX:
                 head = m.content[:600]
@@ -546,6 +549,8 @@ class Agent:
                     content=result.render(),
                     tool_call_id=tc.id,
                     name=tc.name,
+                    # 视觉工具把图片作为多模态分段带给模型
+                    images=list(result.images),
                 ))
 
         yield Step("error", tool_ok=False, text=f"已达最大步数 {self.config.max_steps} ，任务未完成，在『设置→任务步数上限』里调大后重试，")

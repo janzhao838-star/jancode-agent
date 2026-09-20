@@ -262,17 +262,50 @@ class MCPClient:
 
     # ---------- 工具 ----------
 
-    def call_tool(self, tool: str, arguments: dict | None = None) -> str:
+    # MCP 图片块的 MIME 按 MCP 规约给全了；缺省兜 image/png。
+    _MIME_BY_TYPE = {"image": "image/png", "resource": "application/octet-stream"}
+
+    def call_tool_full(self, tool: str, arguments: dict | None = None) -> tuple[str, list[str]]:
+        """返回 (文本, 图片 data URI 列表)。
+
+        图片块不能 json.dumps 塞进文本：一 jpg 好几 MB 的 base64 会把
+        上下文直接撑爆，中转站随之拒单，表现就是「流式响应里没有任何
+        内容」。按多模态分段走，模型才能真正看到图。
+        """
         result = self._rpc("tools/call", {"name": tool, "arguments": arguments or {}})
         parts = []
+        images: list[str] = []
         for block in result.get("content") or []:
-            if isinstance(block, dict) and block.get("type") == "text":
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type")
+            if btype == "text":
                 parts.append(str(block.get("text") or ""))
-            elif isinstance(block, dict):
+            elif btype == "image":
+                mime = str(block.get("mimeType") or "image/png")
+                data = str(block.get("data") or "")
+                if data:
+                    images.append(f"data:{mime};base64,{data}")
+            elif btype == "resource":
+                res = block.get("resource") or {}
+                if isinstance(res, dict) and str(res.get("mimeType", "")).startswith("image/"):
+                    import base64 as _b64
+                    blob = res.get("blob")
+                    if blob:
+                        images.append("data:" + res["mimeType"] + ";base64," + blob)
+                    elif res.get("text"):
+                        parts.append(str(res["text"]))
+                else:
+                    parts.append(json.dumps(block, ensure_ascii=False))
+            else:
                 parts.append(json.dumps(block, ensure_ascii=False))
         text = "\n".join(p for p in parts if p)
         if result.get("isError"):
             raise MCPError(text or "工具执行失败")
+        return text, images
+
+    def call_tool(self, tool: str, arguments: dict | None = None) -> str:
+        text, _ = self.call_tool_full(tool, arguments)
         return text
 
     def tool_specs(self, prefix: str = "mcp") -> list[dict]:
@@ -369,7 +402,8 @@ class Manager:
         if client is None:
             return ToolResult(False, f"MCP 服务 {server!r} 未运行：{self._errors.get(server, '未配置')}")
         try:
-            return ToolResult(True, client.call_tool(tool, arguments or {}))
+            text, images = client.call_tool_full(tool, arguments or {})
+            return ToolResult(True, text, images=images)
         except MCPError as exc:
             return ToolResult(False, f"MCP 工具执行失败：{exc}")
         except Exception as exc:

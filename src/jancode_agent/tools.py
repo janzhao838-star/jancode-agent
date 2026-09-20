@@ -19,7 +19,7 @@ import shutil
 import signal
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
@@ -34,6 +34,9 @@ MAX_GREP_HITS = 200
 class ToolResult:
     ok: bool
     output: str
+    # 视觉：随结果带给模型的图片（data URI）。纯文本工具不填，
+    # wire 格式跟以前完全一样。
+    images: list = field(default_factory=list)
 
     def render(self) -> str:
         return self.output
@@ -44,7 +47,7 @@ class ToolError(Exception):
 
 
 # 「只读」类工具：不产生任何副作用，计划/只读模式下放行。
-READ_ONLY_TOOLS = frozenset({"read_file", "list_dir", "grep", "web_get", "browser_read"})
+READ_ONLY_TOOLS = frozenset({"read_file", "read_image", "list_dir", "grep", "web_get", "browser_read"})
 
 # 这两种模式在代码层面禁止一切有副作用的工具。
 NO_SIDE_EFFECT_MODES = frozenset({"readonly", "plan"})
@@ -241,6 +244,44 @@ class Toolbox:
         if start + len(chunk) - 1 < total:
             numbered += f"\n…（还有 {total - (start + len(chunk) - 1)} 行未显示，可用 offset 继续读）"
         return ToolResult(True, self._clip(head + numbered))
+
+    # 图片读进模型要走的 data URI 前缀，按扩展名给 MIME。
+    _IMAGE_MIME = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+    }
+    # 图片转 base64 后进上下文，5MB 原图就是约 6.7MB 文本——
+    # 直接把上下文撑爆，中转站按长度拒单。超限就拒绝并让用户先压缩。
+    MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+    async def read_image(self, path: str) -> ToolResult:
+        """把本地图片作为真正的图像交给模型（多模态消息），不是文本。"""
+        target, err = self._safe(path)
+        if err:
+            return err
+        assert target is not None
+        if not target.exists():
+            return ToolResult(False, f"文件不存在：{path}。可以先用 list_dir 查看目录内容。")
+        if target.is_dir():
+            return ToolResult(False, f"{path} 是目录，不是文件。")
+        mime = self._IMAGE_MIME.get(target.suffix.lower())
+        if mime is None:
+            known = "、".join(sorted(self._IMAGE_MIME))
+            return ToolResult(False, f"{path} 不是支持的图片格式。支持：{known}。")
+        try:
+            raw = target.read_bytes()
+        except OSError as exc:
+            return ToolResult(False, f"读取 {path} 失败：{exc}")
+        if len(raw) > self.MAX_IMAGE_BYTES:
+            mb = self.MAX_IMAGE_BYTES / (1024 * 1024)
+            return ToolResult(False,
+                f"图片 {len(raw) / (1024 * 1024):.1f}MB 超过 {mb:.0f}MB 上限，"
+                f"先用 bash 压缩（如 sips -Z 1600 {path}）再读。")
+        import base64
+        uri = f"data:{mime};base64,{base64.b64encode(raw).decode()}"
+        kb = len(raw) / 1024
+        return ToolResult(True, f"已读取图片 {path}（{kb:.0f}KB）。请直接描述或分析上面这张图。",
+                          images=[uri])
 
     async def write_file(self, path: str, content: str) -> ToolResult:
         denial = self.policy_error("write_file")
@@ -497,6 +538,20 @@ class Toolbox:
                             "offset": {"type": "integer", "description": "起始行号，从 1 开始"},
                             "limit": {"type": "integer", "description": "最多读取多少行"},
                         },
+                        ["path"],
+                    ),
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_image",
+                    "description": (
+                        "读取一张图片，把它作为真正的图像交给模型看（支持 png/jpg/gif/webp/bmp）。"
+                        "用户让你看图、截图、照片、扫描件时用这个，不要用 read_file 读图片——那只会得到乱码。"
+                    ),
+                    "parameters": obj(
+                        {"path": {"type": "string", "description": "图片文件路径"}},
                         ["path"],
                     ),
                 },

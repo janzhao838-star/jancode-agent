@@ -47,11 +47,26 @@ class Message:
     # 工具结果消息需要回指是哪次调用
     tool_call_id: str = ""
     name: str = ""
+    # 视觉：data URI 形式的图片（read_image 工具、MCP 图片块）。
+    # 为空时 wire 上还是纯字符串 content，行为跟以前完全一样。
+    images: list[str] = field(default_factory=list)
 
     def to_wire(self) -> dict[str, Any]:
         out: dict[str, Any] = {"role": self.role}
-        # 有 tool_calls 时 content 允许为空，但部分中转站要求该字段存在
-        out["content"] = self.content
+        if self.images:
+            # 多模态消息：文本 + 图片分段的列表格式（OpenAI 兼容约定）。
+            # 不带文本段时给个占位，部分网关不认空 text 段。
+            parts: list[dict[str, Any]] = []
+            if self.content:
+                parts.append({"type": "text", "text": self.content})
+            else:
+                parts.append({"type": "text", "text": "（见附图）"})
+            for uri in self.images:
+                parts.append({"type": "image_url", "image_url": {"url": uri}})
+            out["content"] = parts
+        else:
+            # 有 tool_calls 时 content 允许为空，但部分中转站要求该字段存在
+            out["content"] = self.content
         if self.tool_calls:
             out["tool_calls"] = [
                 {
@@ -558,7 +573,17 @@ class Client:
                         "arguments": json.dumps(tc.arguments, ensure_ascii=False),
                     })
             else:
-                items.append({"role": m.role, "content": m.content})
+                # responses 协议的图片走 input_image 分段；没有图就维持原样
+                if m.images:
+                    segs: list[dict[str, Any]] = []
+                    if m.content:
+                        segs.append({"type": "input_text", "text": m.content})
+                    for uri in m.images:
+                        segs.append({"type": "input_image", "image_url": uri,
+                                     "detail": "auto"})
+                    items.append({"role": m.role, "content": segs})
+                else:
+                    items.append({"role": m.role, "content": m.content})
 
         payload: dict[str, Any] = {
             "model": self.provider.model,

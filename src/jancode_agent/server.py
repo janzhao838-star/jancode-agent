@@ -337,10 +337,36 @@ class Handler(BaseHTTPRequestHandler):
             return
         name = str(payload.get("name") or "").strip()
         content = str(payload.get("content") or "").strip()
+        description = str(payload.get("description") or "").strip()
+        # 直接粘贴整个 SKILL.md（带 YAML frontmatter）也能装：
+        # --- 之间的 name/description 抽出来，正文去掉头再入库。
+        # 之前原样入库，正文开头一坨 --- 代码块，模型照着做必然做错。
+        from_frontmatter = False
+        if content.startswith("---"):
+            from_frontmatter = True
+            import re as _re
+            m = _re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, _re.DOTALL)
+            if m:
+                for line in m.group(1).splitlines():
+                    key, _, val = line.partition(":")
+                    key = key.strip().lower()
+                    val = val.strip().strip("\'\"")
+                    if key == "name" and not name:
+                        name = val
+                    elif key == "description" and not description:
+                        description = val
+                content = content[m.end():].strip()
+        # 名字兜底只对「像文档」的内容生效：带 frontmatter，或以 Markdown
+        # 标题开头。随手贴一句话也被拿来当名字的话，「缺名字被拒」的
+        # 校验就形同虚设，库里会攒一堆叫 x、ok 的垃圾技能。
+        if not name and content and (from_frontmatter or content.startswith("#")):
+            first = content.splitlines()[0].lstrip("# ").strip()
+            if 0 < len(first) <= 40:
+                name = first
         if not name or not content:
             self._json({"ok": False, "error": "技能需要名字和内容"})
             return
-        upsert_skill(name, str(payload.get("description") or ""), content)
+        upsert_skill(name, description, content)
         self._json({"ok": True})
 
     def _install_builtin_agent(self, name: str, remove: bool) -> None:
