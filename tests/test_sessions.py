@@ -2,6 +2,7 @@
 """会话持久化：对话历史落盘，重启不丢，坏档不崩。"""
 
 import json
+import os
 import stat
 import threading
 
@@ -80,6 +81,11 @@ def test_存档往返内容一字不差(tmp_path):
 
 
 def test_存档文件权限收紧到600(tmp_path):
+    if os.name == "nt":
+        # Windows 的 FAT/NTFS 不吃 POSIX chmod（os.chmod 只动只读位），
+        # 438=0o666 是预期值。隐私保护在 Windows 上由用户目录 ACL 承担。
+        import pytest
+        pytest.skip("Windows 无 POSIX 文件模式")
     p = tmp_path / "sessions.json"
     save_store(p, _sample_store())
     mode = stat.S_IMODE(p.stat().st_mode)
